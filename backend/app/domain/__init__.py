@@ -66,6 +66,12 @@ from .repository import (
     RepositoryFact,RepositoryFile,RepositoryFileType,RepositoryReference,RepositorySnapshot,
     RepositorySnapshotMetadata,RepositorySourceType,SubmodulePolicy,SubmoduleRecord,SymbolKind,
 )
+from .alignment import (
+    AblationAlignment,AlignmentAmbiguity,AlignmentAnalysisStatus,AlignmentConflict,AlignmentConflictCandidate,
+    AlignmentConflictStatus,AlignmentConflictType,AlignmentItemSource,AlignmentMetadata,AlignmentStatus,AlignmentTrace,
+    DatasetAlignment,ExperimentAlignmentRecord,MetricAlignment,ModelAlignment,PaperCodeAlignmentCatalog,
+    ParameterAlignment,ParameterMappingStatus,UnmatchedAlignmentItem,
+)
 
 __all__ = [
     "AblationDefinition",
@@ -134,4 +140,8 @@ __all__ = [
     "RepositoryConflictCandidate","RepositoryConflictStatus","RepositoryConflictType","RepositoryExperimentImplementation",
     "RepositoryFact","RepositoryFile","RepositoryFileType","RepositoryReference","RepositorySnapshot",
     "RepositorySnapshotMetadata","RepositorySourceType","SubmodulePolicy","SubmoduleRecord","SymbolKind",
+    "AblationAlignment","AlignmentAmbiguity","AlignmentAnalysisStatus","AlignmentConflict","AlignmentConflictCandidate",
+    "AlignmentConflictStatus","AlignmentConflictType","AlignmentItemSource","AlignmentMetadata","AlignmentStatus","AlignmentTrace",
+    "DatasetAlignment","ExperimentAlignmentRecord","MetricAlignment","ModelAlignment","PaperCodeAlignmentCatalog",
+    "ParameterAlignment","ParameterMappingStatus","UnmatchedAlignmentItem",
 ]

@@ -19,6 +19,7 @@ from .repository_analysis import (
     RepositorySourceResolver,RepositoryStaticAnalysisError,ResolvedRepositorySource,
     UnsafeRepositorySourceError,
 )
+from .alignment import AlignmentSettings,AlignmentValidationError,PaperCodeAlignmentError
 
 __all__ = [
     "CompositePaperParser",
@@ -36,4 +37,5 @@ __all__ = [
     "RepositoryCredentialProvider","RepositoryResolutionError","RepositorySnapshotBuilder",
     "RepositorySourceResolver","RepositoryStaticAnalysisError","ResolvedRepositorySource",
     "UnsafeRepositorySourceError",
+    "AlignmentSettings","AlignmentValidationError","PaperCodeAlignmentError",
 ]
