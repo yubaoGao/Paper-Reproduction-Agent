@@ -1,6 +1,6 @@
 # PaperReproAgent
 
-PaperReproAgent 是面向论文实验自动复现的 AI Agent 平台。当前仓库已完成 Task 04：生产目标的 Paper Ingestion，以及此前的论文复现领域模型和运行时边界。
+PaperReproAgent 是面向论文实验自动复现的 AI Agent 平台。当前仓库已完成 Task 05：论文实验智能理解、证据约束的 `PaperExperimentCatalog` 和复现目标解析，以及生产级 Paper Ingestion、论文复现领域模型和运行时边界。
 
 ## 当前能力
 
@@ -10,8 +10,12 @@ PaperReproAgent 是面向论文实验自动复现的 AI Agent 平台。当前仓
 - 通过稳定、解析器无关的 `PaperDocument` 和 evidence locator 向后续 Agent 提供输入；
 - 明确记录 parser/version、fallback、OCR、SUCCESS/PARTIAL_SUCCESS、warning、耗时和内容哈希；
 - 集中限制文件大小、页数、下载和解析时间，并防护 URL SSRF。
+- 通过 DeepSeek V4-Pro PRIMARY 与 Qwen3.6-Flash FAST/VISION 的固定角色完成分阶段实验抽取；
+- 验证 evidence locator、文本与 numeric claim，保留冲突并生成可审计 ExtractionTrace；
+- 将用户复现目标确定性解析为 Catalog 有界的 `ReproductionSpecification`。
 
 详细设计、依赖和安全策略见 [Paper Ingestion](docs/PAPER_INGESTION.md)。
+论文智能抽取架构见 [论文实验智能理解与抽取](docs/PAPER_EXPERIMENT_EXTRACTION.md)。
 
 ## 安装
 
@@ -43,6 +47,7 @@ python -m unittest discover -s tests/unit -v
 ## 文档
 
 - [Paper Ingestion](docs/PAPER_INGESTION.md)
+- [论文实验智能理解与抽取](docs/PAPER_EXPERIMENT_EXTRACTION.md)
 - [项目结构与迁移说明](docs/PROJECT_STRUCTURE.md)
 - [实验领域模型与运行时契约](docs/DOMAIN_MODEL.md)
 - [论文复现任务规范](docs/REPRODUCTION_SPEC.md)

@@ -6,10 +6,12 @@ setup(
     version="0.1.0",
     packages=find_packages(include=["backend", "backend.*"]),
     include_package_data=True,
+    package_data={"backend.app.agents.paper.prompts": ["*.txt"]},
     install_requires=[
         "pydantic>=2.10,<3",
         "pypdf>=5,<7",
         "docling>=2.70,<3",
+        "httpx>=0.27,<1",
         "typing-extensions>=4.12",
     ],
     author="PaperReproAgent contributors",

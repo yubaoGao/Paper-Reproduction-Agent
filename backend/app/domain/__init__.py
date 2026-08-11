@@ -51,6 +51,13 @@ from .paper import (
     TableBlock,
     TableData,
 )
+from .intelligence import (
+    CatalogEntity, ConflictCandidate, ConflictStatus, ConflictType,
+    ExperimentType, ExtractionConflict, ExtractionMetadata, ExtractionStatus,
+    ExtractionTrace, FigureObservation, GoalResolutionResult,
+    GoalResolutionStatus, PaperExperimentCatalog, PaperExperimentRecord,
+    UserReproductionGoal,
+)
 
 __all__ = [
     "AblationDefinition",
@@ -98,4 +105,19 @@ __all__ = [
     "TargetType",
     "TableBlock",
     "TableData",
+    "CatalogEntity",
+    "ConflictCandidate",
+    "ConflictStatus",
+    "ConflictType",
+    "ExperimentType",
+    "ExtractionConflict",
+    "ExtractionMetadata",
+    "ExtractionStatus",
+    "ExtractionTrace",
+    "FigureObservation",
+    "GoalResolutionResult",
+    "GoalResolutionStatus",
+    "PaperExperimentCatalog",
+    "PaperExperimentRecord",
+    "UserReproductionGoal",
 ]
