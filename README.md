@@ -1,18 +1,37 @@
 # PaperReproAgent
 
-PaperReproAgent 是面向论文实验自动复现的 AI Agent 平台。目标输入包括论文、代码仓库、数据集和复现目标；目标输出是可审计的实验运行、结构化指标、论文声明值对照和复现报告。
+PaperReproAgent 是面向论文实验自动复现的 AI Agent 平台。当前仓库已完成 Task 04：生产目标的 Paper Ingestion，以及此前的论文复现领域模型和运行时边界。
 
-当前仓库已完成 **Task 03：Paper Reproduction Specification**。项目已具备论文引用、复现目标、论文声明、来源证据、未知/推断信息和消融定义模型，并保持论文语义目标到可执行实验的一对多规划边界。Paper Parser、Reproduction Planner、FastAPI、数据库、队列、React、sandbox、GPU Scheduler 和真实 Curie execution 尚未实现。
+## 当前能力
 
-## 架构边界
+- 安全解析本地 PDF、上传 bytes/stream、URL 和 arXiv 来源；
+- 以 Docling 恢复 reading order、章节层级、OCR、结构化表格和图片；
+- 主解析不可用时使用 pypdf 保留 page-level text；
+- 通过稳定、解析器无关的 `PaperDocument` 和 evidence locator 向后续 Agent 提供输入；
+- 明确记录 parser/version、fallback、OCR、SUCCESS/PARTIAL_SUCCESS、warning、耗时和内容哈希；
+- 集中限制文件大小、页数、下载和解析时间，并防护 URL SSRF。
 
-- `backend/app/curie_core/`：从 [Just-Curieous/Curie](https://github.com/Just-Curieous/Curie) 复用并迁移的科学实验推理、验证和实验内编排能力。
-- `backend/app/domain/`、`services/`：论文复现语义、可执行实验领域模型与未来应用用例。
-- `backend/app/runtime/`：平台与执行环境之间的稳定接口、内存事件接收器和 Curie adapter skeleton；未来承载安全 sandbox。
-- `backend/app/runtime/legacy/`：隔离的 `LEGACY_RUNTIME`，不得被新平台代码直接依赖。
-- `frontend/`、`infra/`：未来 Web 前端、容器和部署实现。
+详细设计、依赖和安全策略见 [Paper Ingestion](docs/PAPER_INGESTION.md)。
 
-Curie Core 的 `InternalExperimentScheduler` 负责单个实验内部的 plan partition、control/experimental group、worker assignment 和 agent routing。未来 Platform GPU Scheduler 负责 `ExperimentRun` admission、并发与 GPU/CPU/RAM 分配；两者是不同层次的组件。
+## 安装
+
+项目要求 Python 3.11 或更高版本：
+
+```powershell
+python -m pip install -e .
+```
+
+Docling 首次运行可能下载模型权重；生产环境应在构建/部署阶段预取并固定缓存。选择 Tesseract OCR 时需额外安装系统级 Tesseract 并配置 `TESSDATA_PREFIX`。pypdf 始终保留为轻量 fallback。
+
+## 分层边界
+
+- `backend/app/domain/`：解析器无关的论文和实验领域模型；
+- `backend/app/services/`：Paper Ingestion 应用契约与组合策略；
+- `backend/app/infrastructure/paper/`：Docling、pypdf 与安全下载适配器；
+- `backend/app/curie_core/`：科学实验推理和实验内部编排；
+- `backend/app/runtime/`：平台运行时契约，不依赖 legacy runtime。
+
+本阶段没有实现 Experiment Extraction Agent、自动生成 `ReproductionSpecification`、Repository Analyzer、Paper-Code Alignment、Planner、Result Comparator、FastAPI、PostgreSQL、Redis、GPU Scheduler、Docker Experiment Runtime 或 React。
 
 ## Windows 本地检查
 
@@ -21,10 +40,9 @@ python -m compileall backend tests
 python -m unittest discover -s tests/unit -v
 ```
 
-完整 Docker/OpenHands/GPU integration 明确推迟到 Linux GPU Server Integration Phase。
-
 ## 文档
 
+- [Paper Ingestion](docs/PAPER_INGESTION.md)
 - [项目结构与迁移说明](docs/PROJECT_STRUCTURE.md)
 - [实验领域模型与运行时契约](docs/DOMAIN_MODEL.md)
 - [论文复现任务规范](docs/REPRODUCTION_SPEC.md)
@@ -32,4 +50,4 @@ python -m unittest discover -s tests/unit -v
 
 ## Attribution 与许可证
 
-Curie Core 源自 [Just-Curieous/Curie](https://github.com/Just-Curieous/Curie) 的提交 `db1b1f56159b591515f77e03c55bf473d5c1c201`，并在 Apache License 2.0 下进行二次开发。原始许可与版权声明保留在 [LICENSE](LICENSE)。PaperReproAgent 是新产品名；“Curie”仅指内部复用的 Curie Core。
+Curie Core 源自 [Just-Curieous/Curie](https://github.com/Just-Curieous/Curie) 提交 `db1b1f56159b591515f77e03c55bf473d5c1c201`，并在 Apache License 2.0 下二次开发。原始许可与版权声明保留在 [LICENSE](LICENSE)。

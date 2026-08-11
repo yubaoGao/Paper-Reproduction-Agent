@@ -8,6 +8,8 @@ setup(
     include_package_data=True,
     install_requires=[
         "pydantic>=2.10,<3",
+        "pypdf>=5,<7",
+        "docling>=2.70,<3",
         "typing-extensions>=4.12",
     ],
     author="PaperReproAgent contributors",
