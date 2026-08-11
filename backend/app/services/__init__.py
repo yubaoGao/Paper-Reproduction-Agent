@@ -13,6 +13,12 @@ from .paper_ingestion import (
     ResolvedPaperSource,
     UnsafePaperSourceError,
 )
+from .repository_analysis import (
+    InvalidRepositorySourceError,RepositoryAnalysisError,RepositoryAnalysisSettings,
+    RepositoryCredentialProvider,RepositoryResolutionError,RepositorySnapshotBuilder,
+    RepositorySourceResolver,RepositoryStaticAnalysisError,ResolvedRepositorySource,
+    UnsafeRepositorySourceError,
+)
 
 __all__ = [
     "CompositePaperParser",
@@ -26,4 +32,8 @@ __all__ = [
     "PaperSourceResolver",
     "ResolvedPaperSource",
     "UnsafePaperSourceError",
+    "InvalidRepositorySourceError","RepositoryAnalysisError","RepositoryAnalysisSettings",
+    "RepositoryCredentialProvider","RepositoryResolutionError","RepositorySnapshotBuilder",
+    "RepositorySourceResolver","RepositoryStaticAnalysisError","ResolvedRepositorySource",
+    "UnsafeRepositorySourceError",
 ]

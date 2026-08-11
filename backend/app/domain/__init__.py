@@ -58,6 +58,14 @@ from .intelligence import (
     GoalResolutionStatus, PaperExperimentCatalog, PaperExperimentRecord,
     UserReproductionGoal,
 )
+from .repository import (
+    CliArgument,CodeIndex,CodeSymbol,DependencyRecord,EntrypointCandidate,EntrypointType,GitLfsPointer,
+    RepositoryAnalysisCatalog,RepositoryAnalysisMetadata,RepositoryAnalysisStatus,RepositoryAnalysisTrace,
+    RepositoryCommand,RepositoryComponentRecord,RepositoryConfigRecord,RepositoryConflict,
+    RepositoryConflictCandidate,RepositoryConflictStatus,RepositoryConflictType,RepositoryExperimentImplementation,
+    RepositoryFact,RepositoryFile,RepositoryFileType,RepositoryReference,RepositorySnapshot,
+    RepositorySnapshotMetadata,RepositorySourceType,SubmodulePolicy,SubmoduleRecord,SymbolKind,
+)
 
 __all__ = [
     "AblationDefinition",
@@ -120,4 +128,10 @@ __all__ = [
     "PaperExperimentCatalog",
     "PaperExperimentRecord",
     "UserReproductionGoal",
+    "CliArgument","CodeIndex","CodeSymbol","DependencyRecord","EntrypointCandidate","EntrypointType","GitLfsPointer",
+    "RepositoryAnalysisCatalog","RepositoryAnalysisMetadata","RepositoryAnalysisStatus","RepositoryAnalysisTrace",
+    "RepositoryCommand","RepositoryComponentRecord","RepositoryConfigRecord","RepositoryConflict",
+    "RepositoryConflictCandidate","RepositoryConflictStatus","RepositoryConflictType","RepositoryExperimentImplementation",
+    "RepositoryFact","RepositoryFile","RepositoryFileType","RepositoryReference","RepositorySnapshot",
+    "RepositorySnapshotMetadata","RepositorySourceType","SubmodulePolicy","SubmoduleRecord","SymbolKind",
 ]
