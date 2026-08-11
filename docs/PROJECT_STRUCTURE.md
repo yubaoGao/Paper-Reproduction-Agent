@@ -101,9 +101,12 @@ Curie Core 不负责 User、Authentication、HTTP、Database、Job Queue、GPU a
 
 ## 8. 后续迁移顺序
 
-1. 定义 Curie Core 的运行输入/事件/结果 contract，去除 config/CWD/全局 logger 假设。
-2. 将 OpenHands、shell、PDF 和 artifact I/O 从 `tool.py` 拆成 ports + runtime/infrastructure adapters。
-3. 将 in-memory plan/store 抽象为 per-run repository，同时保持 internal scheduler 语义。
-4. 实现结构化论文复现领域模型与 ingestion pipeline。
-5. 实现安全 sandbox provider，再在 Linux GPU Server 执行完整 Curie integration。
-6. 用 Structured Result Comparator/Reproduction Report 替换 `legacy_reporter.py`，最后删除 LEGACY_RUNTIME。
+Task 02 已完成 provider-neutral 的实验领域模型、运行输入/事件/结果 contract、
+`RunEventSink` 和 Curie adapter translation seam，详见
+[`DOMAIN_MODEL.md`](DOMAIN_MODEL.md)。真实 Curie workflow 尚未接入该 contract。
+
+1. 按后续任务定义实现论文与代码 ingestion，不将解析逻辑塞入 domain model。
+2. 将 OpenHands、shell、PDF 和 artifact I/O 从 `tool.py` 逐步拆到必要的 runtime/infrastructure adapters。
+3. 将 in-memory plan/store 演进为 per-run repository，同时保持 internal scheduler 语义。
+4. 实现安全 sandbox provider，再在 Linux GPU Server 执行完整 Curie integration。
+5. 用 Structured Result Comparator/Reproduction Report 替换 `legacy_reporter.py`，最后删除 LEGACY_RUNTIME。

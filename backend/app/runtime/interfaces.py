@@ -2,37 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Mapping, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
+
+from backend.app.domain import RunEvent, RunRequest, RunResult
 
 
-@dataclass(frozen=True)
-class RuntimeRequest:
-    """Provider-neutral input required to start an isolated experiment run."""
+@runtime_checkable
+class RunEventSink(Protocol):
+    """Destination for ordered events produced by an experiment runtime."""
 
-    run_id: str
-    workspace: Path
-    specification_ref: str
-    environment: Mapping[str, str] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class RuntimeResult:
-    """Minimal result returned to the platform orchestration layer."""
-
-    run_id: str
-    exit_code: int
-    artifact_paths: tuple[Path, ...] = ()
+    def publish(self, event: RunEvent) -> None:
+        """Publish one event without coupling the runtime to a transport."""
 
 
 @runtime_checkable
 class ExperimentRuntime(Protocol):
-    """Interface future sandbox runtimes must implement.
+    """Provider-neutral interface implemented by experiment runtimes."""
 
-    The retained legacy Curie runtime intentionally does not implement this
-    contract yet, preventing accidental use by new platform code.
-    """
-
-    def run(self, request: RuntimeRequest) -> RuntimeResult:
-        """Run one already-admitted experiment in an isolated environment."""
+    def run(self, request: RunRequest, event_sink: RunEventSink) -> RunResult:
+        """Execute one admitted run and return its terminal result."""
