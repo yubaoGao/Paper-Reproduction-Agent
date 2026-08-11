@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+*.log
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+.venv/
+venv/
+.vscode/
+.DS_Store
+
+# Runtime artifacts and local credentials
+logs/
+workspace/*
+!workspace/.gitkeep
+.setup/
+config.toml
+.aws_creds
+
+# Retained legacy runtime local configuration
+backend/app/curie_core/config.toml
