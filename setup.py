@@ -6,7 +6,7 @@ setup(
     version="0.1.0",
     packages=find_packages(include=["backend", "backend.*"]),
     include_package_data=True,
-    package_data={"backend.app.agents.paper.prompts": ["*.txt"],"backend.app.agents.repository.prompts": ["*.txt"],"backend.app.agents.alignment.prompts": ["*.txt"]},
+    package_data={"backend.app.agents.paper.prompts": ["*.txt"],"backend.app.agents.repository.prompts": ["*.txt"],"backend.app.agents.alignment.prompts": ["*.txt"],"backend.app.agents.planner.prompts": ["*.txt"]},
     install_requires=[
         "pydantic>=2.10,<3",
         "pypdf>=5,<7",

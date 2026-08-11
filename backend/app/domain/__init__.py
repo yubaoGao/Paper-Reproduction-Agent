@@ -6,6 +6,8 @@ from .experiment import (
     ArtifactKind,
     DatasetSource,
     EnvironmentSpecification,
+    EnvironmentRequirement,
+    ExecutableCommand,
     EventType,
     ExperimentRun,
     ExperimentSpecification,
@@ -13,8 +15,11 @@ from .experiment import (
     LogPayload,
     Metric,
     MetricExpectation,
+    DatasetAvailability,
+    DatasetRequirement,
     RepositorySource,
     ResourceRequest,
+    ResourceRequirement,
     RunError,
     RunEvent,
     RunRequest,
@@ -72,6 +77,10 @@ from .alignment import (
     DatasetAlignment,ExperimentAlignmentRecord,MetricAlignment,ModelAlignment,PaperCodeAlignmentCatalog,
     ParameterAlignment,ParameterMappingStatus,UnmatchedAlignmentItem,
 )
+from .planner import (
+    BlockerSeverity,DecisionSource,ExperimentDependency,PlanBlocker,PlanningMetadata,PlanningOverrides,
+    PlanningTrace,PlannerDecision,PlanStatus,ReproductionExecutionPlan,ReproductionPolicy,UnresolvedPlanItem,
+)
 
 __all__ = [
     "AblationDefinition",
@@ -83,6 +92,7 @@ __all__ = [
     "ArtifactKind",
     "DatasetSource",
     "EnvironmentSpecification",
+    "EnvironmentRequirement","ExecutableCommand",
     "EvidenceReference",
     "EvidenceSourceType",
     "EventType",
@@ -94,6 +104,7 @@ __all__ = [
     "LogPayload",
     "Metric",
     "MetricExpectation",
+    "DatasetAvailability","DatasetRequirement",
     "PaperClaim",
     "PaperDocument",
     "PageBlock",
@@ -106,6 +117,7 @@ __all__ = [
     "ReproductionSpecification",
     "ReproductionTarget",
     "ResourceRequest",
+    "ResourceRequirement",
     "RunError",
     "RunEvent",
     "RunRequest",
@@ -144,4 +156,6 @@ __all__ = [
     "AlignmentConflictStatus","AlignmentConflictType","AlignmentItemSource","AlignmentMetadata","AlignmentStatus","AlignmentTrace",
     "DatasetAlignment","ExperimentAlignmentRecord","MetricAlignment","ModelAlignment","PaperCodeAlignmentCatalog",
     "ParameterAlignment","ParameterMappingStatus","UnmatchedAlignmentItem",
+    "BlockerSeverity","DecisionSource","ExperimentDependency","PlanBlocker","PlanningMetadata","PlanningOverrides",
+    "PlanningTrace","PlannerDecision","PlanStatus","ReproductionExecutionPlan","ReproductionPolicy","UnresolvedPlanItem",
 ]

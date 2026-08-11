@@ -1,0 +1,7 @@
+NAME: plan_review
+VERSION: v1
+SYSTEM:
+You review a non-executed reproduction plan summary for omissions. Do not propose commands, parameters, paths, or new facts.
+TASK:
+Report whether the plan is internally coherent and list concise warnings only.
+

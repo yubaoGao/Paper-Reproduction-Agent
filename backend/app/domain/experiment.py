@@ -11,6 +11,7 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
+    SerializeAsAny,
     StringConstraints,
     field_validator,
     model_validator,
@@ -121,6 +122,26 @@ class MetricExpectation(DomainModel):
             raise ValueError("boolean values are not valid metrics")
         return value
 
+class DatasetAvailability(str,Enum): AVAILABLE="available"; BINDING_REQUIRED="binding_required"; UNKNOWN="unknown"
+class ExecutableCommand(DomainModel):
+    """Argument-vector command declaration; never a shell expression."""
+    program:NonEmptyStr;arguments:tuple[NonEmptyStr,...]=();working_directory:NonEmptyStr=".";environment_variable_references:tuple[NonEmptyStr,...]=();entrypoint_id:NonEmptyStr|None=None;config_ids:tuple[NonEmptyStr,...]=();command_reference_id:NonEmptyStr|None=None
+    @model_validator(mode="after")
+    def reject_shell_syntax(self):
+        unsafe={"&&","||",";","|",">","<"}
+        if self.program in unsafe or any(x in unsafe or "\n" in x or "\r" in x for x in self.arguments):raise ValueError("structured command cannot contain shell control operators")
+        return self
+class DatasetRequirement(DomainModel):
+    name:NonEmptyStr;repository_dataset_id:NonEmptyStr|None=None;binding:NonEmptyStr|None=None;split:NonEmptyStr|None=None;preprocessing_assumptions:tuple[NonEmptyStr,...]=();loader_references:tuple[NonEmptyStr,...]=();paper_evidence:tuple[SerializeAsAny[DomainModel],...]=();repository_evidence:tuple[SerializeAsAny[DomainModel],...]=();availability:DatasetAvailability
+    @model_validator(mode="after")
+    def binding_matches_status(self):
+        if self.availability is DatasetAvailability.AVAILABLE and self.binding is None:raise ValueError("available dataset requires a binding")
+        return self
+class EnvironmentRequirement(DomainModel):
+    python_constraint:NonEmptyStr|None=None;dependencies:tuple[NonEmptyStr,...]=();system_dependencies:tuple[NonEmptyStr,...]=();frameworks:tuple[NonEmptyStr,...]=();cuda_hints:tuple[NonEmptyStr,...]=();manifest_references:tuple[NonEmptyStr,...]=()
+class ResourceRequirement(DomainModel):
+    gpu_required:bool|None=None;gpu_count:int|None=Field(default=None,ge=0);cpu_cores:float|None=Field(default=None,gt=0);memory_mb:int|None=Field(default=None,ge=128);notes:tuple[NonEmptyStr,...]=()
+
 
 class ExperimentSpecification(DomainModel):
     """Reusable definition of what experiment should be executed."""
@@ -133,19 +154,27 @@ class ExperimentSpecification(DomainModel):
     dataset: DatasetSource | None = None
     entrypoint: NonEmptyStr | None = None
     command: tuple[NonEmptyStr, ...] = ()
+    resolved_command: ExecutableCommand | None = None
     environment: EnvironmentSpecification = Field(default_factory=EnvironmentSpecification)
+    dataset_requirement: DatasetRequirement | None = None
+    environment_requirement: EnvironmentRequirement = Field(default_factory=EnvironmentRequirement)
+    resource_requirement: ResourceRequirement = Field(default_factory=ResourceRequirement)
     hyperparameters: dict[NonEmptyStr, JsonValue] = Field(default_factory=dict)
     expected_metrics: tuple[MetricExpectation, ...] = ()
+    expected_claim_ids: tuple[NonEmptyStr,...] = ()
+    provenance_decision_ids: tuple[NonEmptyStr,...] = ()
     seed: int | None = None
     tags: tuple[NonEmptyStr, ...] = ()
     metadata: dict[NonEmptyStr, JsonValue] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def require_execution_target(self) -> ExperimentSpecification:
-        if self.entrypoint is None and not self.command:
+        if self.entrypoint is None and not self.command and self.resolved_command is None:
             raise ValueError("entrypoint or command is required")
         if len(set(self.tags)) != len(self.tags):
             raise ValueError("tags must be unique")
+        if len(set(self.expected_claim_ids))!=len(self.expected_claim_ids):raise ValueError("expected claim ids must be unique")
+        if len(set(self.provenance_decision_ids))!=len(self.provenance_decision_ids):raise ValueError("provenance decision ids must be unique")
         return self
 
 
