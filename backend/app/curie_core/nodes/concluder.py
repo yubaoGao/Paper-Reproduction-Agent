@@ -74,3 +74,8 @@ All partitions for all experimental plans have completed, with results produced 
         # NOTE: currently because I don't think divergent parallel execution is possible, we will just return to supervisor if even one workflow is considered incorrect (even though there may be others that are correct which we can in principle forward to the exec_verifier)
         # Inform supervisor that verifier has completed a run:
         return self.node_config.transition_objs["after_concluder"](item)
+
+def conclude_reproduction_execution(command_result,validations):
+    """Conclude one fixed specification without altering the outer plan."""
+    from backend.app.curie_core.reproduction import concluder_decide
+    return concluder_decide(command_result,validations)

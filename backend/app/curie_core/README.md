@@ -1,7 +1,7 @@
 # Curie Core
 
-Curie Core 是 PaperReproAgent 内部复用的科学实验推理与实验内编排组件。
+Curie Core 是 PaperReproAgent 内部复用的科学实验推理与单次实验编排组件，保留 Architect、Technician、Validator、Patcher、Analyzer、Concluder、LangGraph workflow 和 `InternalExperimentScheduler`。
 
-当前包含 Architect、Technician、Validator、Patcher、Analyzer、Concluder、LangGraph workflow、实验计划工具、LLM 适配和 `InternalExperimentScheduler`。它不拥有用户、HTTP、数据库、任务队列、GPU 分配、artifact storage 或多租户概念。
+Task 09 的 production 入口是 `CurieRuntimeAdapter`。命令执行、工作区、coding agent 与 artifact 收集均通过 runtime ports 注入；Core 不再提供默认 host shell。原 `legacy_reporter.py` 仅作为历史文件保留，新的 workflow 和结果链不引用它。`backend/app/runtime/legacy/` 同样不进入 production import path。
 
-`tool.py` 中仍混合了一部分 OpenHands/shell 实现，`legacy_reporter.py` 仍被现有 workflow 调用。这些是已记录的后续拆分点，不代表 Platform Layer 可以直接依赖旧 runtime。
+`reproduction.py` 是现有 Curie 组件共同委托的无重依赖 reproduction-mode 逻辑，使 Windows 单元测试不必安装 LangGraph、Docker、OpenHands 或 GPU runtime。它不定义第二套 Agent；原组件模块和 production workflow 使用同一实现。

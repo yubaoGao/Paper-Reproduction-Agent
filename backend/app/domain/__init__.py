@@ -2,6 +2,7 @@
 
 from .experiment import (
     AgentEventPayload,
+    CommandEventPayload,
     Artifact,
     ArtifactKind,
     DatasetSource,
@@ -13,6 +14,8 @@ from .experiment import (
     ExperimentSpecification,
     ExperimentTaskType,
     LogPayload,
+    PatchEventPayload,
+    PlanEventPayload,
     Metric,
     MetricExpectation,
     DatasetAvailability,
@@ -29,6 +32,7 @@ from .experiment import (
     RunTerminalPayload,
     RuntimeOptions,
     StatusChangedPayload,
+    ValidationEventPayload,
 )
 from .reproduction import (
     AblationDefinition,
@@ -88,6 +92,7 @@ __all__ = [
     "ContentBlock",
     "ContentBlockType",
     "AgentEventPayload",
+    "CommandEventPayload",
     "Artifact",
     "ArtifactKind",
     "DatasetSource",
@@ -102,6 +107,7 @@ __all__ = [
     "InformationStatus",
     "FigureBlock",
     "LogPayload",
+    "PatchEventPayload","PlanEventPayload",
     "Metric",
     "MetricExpectation",
     "DatasetAvailability","DatasetRequirement",
@@ -128,6 +134,7 @@ __all__ = [
     "RuntimeOptions",
     "SectionBlock",
     "StatusChangedPayload",
+    "ValidationEventPayload",
     "TargetType",
     "TableBlock",
     "TableData",

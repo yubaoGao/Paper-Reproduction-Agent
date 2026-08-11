@@ -32,8 +32,16 @@ from . import utils
 import json
 import re
 import os
+from contextvars import ContextVar
 
 from .logger import init_logger
+_run_scope:ContextVar[tuple[str,...]|None]=ContextVar("curie_run_scope",default=None)
+def configure_run_scope(run_id:str,experiment_id:str):_run_scope.set(("run",str(run_id),"experiment",str(experiment_id)))
+def _require_run_scope():
+    value=_run_scope.get()
+    if value is None:raise RuntimeError("Curie tool run scope is not configured")
+    return value
+
 def setup_tool_logging(log_filename: str):
     global curie_logger 
     curie_logger = init_logger(log_filename)
@@ -432,7 +440,7 @@ class PatcherAgentTool(BaseTool):
             output = shell_tool.run({
                 "commands": [
                     f"export LOG_ALL_EVENTS=true; "
-                    f'sed -i "474i \          \'organization\': \'499023\'," /root/.cache/pypoetry/virtualenvs/openhands-ai-*-py3.12/lib/python3.12/site-packages/litellm/llms/azure/azure.py; '
+                    f'sed -i "474i \\          \'organization\': \'499023\'," /root/.cache/pypoetry/virtualenvs/openhands-ai-*-py3.12/lib/python3.12/site-packages/litellm/llms/azure/azure.py; '
                     f"{chmod_cmd}; "
                     f"export WORKSPACE_BASE={openhands_dir}; "
                     f"export SANDBOX_TIMEOUT=600; " # FIXME: hardcoded timeout
@@ -801,9 +809,9 @@ class NewExpPlanStoreWriteTool(BaseTool):
         
         Note: we are guaranteed that plan will conform to the required format
         """
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-plans" 
-        namespace = (user_id, application_context) # just a random namespace name for now
+        namespace = (*run_scope, application_context) # just a random namespace name for now
         
         curie_logger.info("Writing new plan 📖 ")
 
@@ -820,9 +828,9 @@ class NewExpPlanStoreWriteTool(BaseTool):
         return memory_id
     
     def async_notify_sched_modify_plan(self, plan_id: str):
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-sched" 
-        sched_namespace = (user_id, application_context) # just a random namespace name for now
+        sched_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         memory_id = str("supervisor_wrote_list")
     
@@ -878,9 +886,9 @@ class NewExpPlanStoreWriteTool(BaseTool):
         """
         curie_logger.info("Add Plan Metadata. ")
 
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-sched" 
-        sched_namespace = (user_id, application_context) # just a random namespace name for now
+        sched_namespace = (*run_scope, application_context) # just a random namespace name for now
         memory_id = str("question")
         question = self.metadata_store.get(sched_namespace, memory_id)
         question = question.dict()["value"]
@@ -959,9 +967,9 @@ class ExistingExpPlanStoreWriteTool(BaseTool):
         
         Note: we are guaranteed that plan will conform to the required format
         """
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-plans" 
-        namespace = (user_id, application_context) # just a random namespace name for now
+        namespace = (*run_scope, application_context) # just a random namespace name for now
         
         curie_logger.info("Modifying existing plan...")
         memory_id = plan_id
@@ -976,9 +984,9 @@ class ExistingExpPlanStoreWriteTool(BaseTool):
         return memory_id
     
     def async_notify_sched_modify_plan(self, plan_id: str):
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-sched" 
-        sched_namespace = (user_id, application_context) # just a random namespace name for now
+        sched_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         memory_id = str("supervisor_wrote_list")
     
@@ -1024,7 +1032,7 @@ class RedoExpPartitionTool(BaseTool):
         super().__init__()
         self.store = store
         self.metadata_store = metadata_store
-        # self.user_id = "admin"
+        # self.run_scope = _require_run_scope()
         # self.application_context = "exp-plans" 
         # self.namespace = (self.user_id, self.application_context) # just a random namespace name for now
     
@@ -1045,9 +1053,9 @@ class RedoExpPartitionTool(BaseTool):
         
         Note: we are guaranteed that plan will conform to the required format
         """
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-plans" 
-        plan_namespace = (user_id, application_context) # just a random namespace name for now
+        plan_namespace = (*run_scope, application_context) # just a random namespace name for now
         
         curie_logger.info("Modifying existing plan...")
 
@@ -1069,9 +1077,9 @@ class RedoExpPartitionTool(BaseTool):
         return "Record partition for redo successful."
 
     def async_notify_sched_redo_partition(self, plan_id: str, group: str, partition_name: str, error_feedback: str):
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-sched" 
-        sched_namespace = (user_id, application_context) # just a random namespace name for now
+        sched_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         memory_id = str("supervisor_redo_partition_list")
     
@@ -1118,7 +1126,7 @@ class RemoveExpPartitionTool(BaseTool):
         super().__init__()
         self.store = store
         self.metadata_store = metadata_store
-        # self.user_id = "admin"
+        # self.run_scope = _require_run_scope()
         # self.application_context = "exp-plans" 
         # self.namespace = (self.user_id, self.application_context) # just a random namespace name for now
     
@@ -1138,9 +1146,9 @@ class RemoveExpPartitionTool(BaseTool):
         
         Note: we are guaranteed that plan will conform to the required format
         """
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-plans" 
-        plan_namespace = (user_id, application_context) # just a random namespace name for now
+        plan_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         curie_logger.info("Modifying existing plan...")
 
@@ -1165,9 +1173,9 @@ class RemoveExpPartitionTool(BaseTool):
         return "Edit priority successful."
 
     def async_notify_sched_modify_plan(self, plan_id: str):
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-sched" 
-        sched_namespace = (user_id, application_context) # just a random namespace name for now
+        sched_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         memory_id = str("supervisor_wrote_list")
     
@@ -1212,9 +1220,9 @@ class ArchiveExpPlanTool(BaseTool):
         
         Note: we are guaranteed that plan will conform to the required format
         """
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-plans" 
-        plan_namespace = (user_id, application_context) # just a random namespace name for now
+        plan_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         curie_logger.info("Modifying existing plan...")
 
@@ -1232,9 +1240,9 @@ class ArchiveExpPlanTool(BaseTool):
         return "Plan removal successful."
 
     def del_sched_metadata(self, plan_id: str):
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-sched" 
-        sched_namespace = (user_id, application_context) # just a random namespace name for now
+        sched_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         # Remove existing plan from supervisor_wrote_list:
         memory_id = str("supervisor_wrote_list")
@@ -1301,7 +1309,7 @@ class EditExpPriorityTool(BaseTool):
         super().__init__()
         self.store = store
         self.metadata_store = metadata_store
-        # self.user_id = "admin"
+        # self.run_scope = _require_run_scope()
         # self.application_context = "exp-plans" 
         # self.namespace = (self.user_id, self.application_context) # just a random namespace name for now
     
@@ -1320,9 +1328,9 @@ class EditExpPriorityTool(BaseTool):
         
         Note: we are guaranteed that plan will conform to the required format
         """
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-plans" 
-        plan_namespace = (user_id, application_context) # just a random namespace name for now
+        plan_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         # print(state["prev_agent"])
         
@@ -1344,9 +1352,9 @@ class EditExpPriorityTool(BaseTool):
         return "Edit priority successful."
 
     def async_notify_sched_modify_plan(self, plan_id: str):
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-sched" 
-        sched_namespace = (user_id, application_context) # just a random namespace name for now
+        sched_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         memory_id = str("supervisor_wrote_list")
     
@@ -1398,7 +1406,7 @@ class EditExpPriorityTool(BaseTool):
 #         super().__init__()
 #         self.store = store
 #         self.metadata_store = metadata_store
-#         # self.user_id = "admin"
+#         # self.run_scope = _require_run_scope()
 #         # self.application_context = "exp-plans" 
 #         # self.namespace = (self.user_id, self.application_context) # just a random namespace name for now
     
@@ -1419,9 +1427,9 @@ class EditExpPriorityTool(BaseTool):
         
 #         Note: we are guaranteed that plan will conform to the required format
 #         """
-#         user_id = "admin"
+#         run_scope = _require_run_scope()
 #         application_context = "exp-plans" 
-#         plan_namespace = (user_id, application_context) # just a random namespace name for now
+#         plan_namespace = (*run_scope, application_context) # just a random namespace name for now
 
 #         # print(state["prev_agent"])
         
@@ -1444,9 +1452,9 @@ class EditExpPriorityTool(BaseTool):
 #         return "Success."
 
 #     def async_notify_sched_modify_plan(self, plan_id: str):
-#         user_id = "admin"
+#         run_scope = _require_run_scope()
 #         application_context = "exp-sched" 
-#         sched_namespace = (user_id, application_context) # just a random namespace name for now
+#         sched_namespace = (*run_scope, application_context) # just a random namespace name for now
 
 #         memory_id = str("supervisor_wrote_list")
     
@@ -1486,9 +1494,9 @@ class StoreGetTool(BaseTool):
         """
         Use the tool.
         """
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-plans" 
-        namespace = (user_id, application_context) # just a random namespace name for now
+        namespace = (*run_scope, application_context) # just a random namespace name for now
         
         if not plan_id: # get all plans
             items = self.store.search(namespace)
@@ -1518,9 +1526,9 @@ class StoreGetTool(BaseTool):
 #     """Stores useful information"""
 #     # InMemoryStore saves data to an in-memory dictionary. Use a DB-backed store in production use.
 #     # store = InMemoryStore()
-#     user_id = "admin"
+#     run_scope = _require_run_scope()
 #     application_context = "exp-plans" 
-#     namespace = (user_id, application_context) # just a random namespace name for now
+#     namespace = (*run_scope, application_context) # just a random namespace name for now
 #     memory_id = str(uuid.uuid4())
     
 #     memory = {"rules": ["User likes short, direct language", "User only speaks English & python"], "my-key": "my-value"}
@@ -1534,9 +1542,9 @@ class StoreGetTool(BaseTool):
 
 # def store_get_tool(memory_id, store):
 #     # store = InMemoryStore()
-#     user_id = "admin"
+#     run_scope = _require_run_scope()
 #     application_context = "exp-plans" 
-#     namespace = (user_id, application_context) # just a random namespace name for now
+#     namespace = (*run_scope, application_context) # just a random namespace name for now
 #     # memory_id = "9b177ab7-d35e-4cca-b5a0-e5af08bfbeb2"
 #     item = store.get(namespace, memory_id)
 #     print(item)
@@ -1605,9 +1613,9 @@ class ExpPlanCompletedWriteTool(BaseTool):
         Use the tool.
         """
         
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-plans" 
-        plan_namespace = (user_id, application_context) # just a random namespace name for now
+        plan_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         print("Modifying existing plan...")
 
@@ -1692,9 +1700,9 @@ class LLMVerifierWriteTool(BaseTool):
         Use the tool.
         """
         
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-sched" 
-        sched_namespace = (user_id, application_context) # just a random namespace name for now
+        sched_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         memory_id = str("llm_verifier_wrote_list")
     
@@ -1767,7 +1775,7 @@ class PatchVerifierWriteTool(BaseTool):
         super().__init__()
         self.store = store
         self.metadata_store = metadata_store
-        # self.user_id = "admin"
+        # self.run_scope = _require_run_scope()
         # self.application_context = "exp-plans" 
         # self.namespace = (self.user_id, self.application_context) # just a random namespace name for now
     
@@ -1790,9 +1798,9 @@ class PatchVerifierWriteTool(BaseTool):
         Use the tool.
         """
         
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-sched" 
-        sched_namespace = (user_id, application_context) # just a random namespace name for now
+        sched_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         memory_id = str("patch_verifier_wrote_list")
     
@@ -1857,7 +1865,7 @@ class AnalyzerWriteTool(BaseTool):
         super().__init__()
         self.store = store
         self.metadata_store = metadata_store
-        # self.user_id = "admin"
+        # self.run_scope = _require_run_scope()
         # self.application_context = "exp-plans" 
         # self.namespace = (self.user_id, self.application_context) # just a random namespace name for now
     
@@ -1878,9 +1886,9 @@ class AnalyzerWriteTool(BaseTool):
         Use the tool.
         """
         
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-sched" 
-        sched_namespace = (user_id, application_context) # just a random namespace name for now
+        sched_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         memory_id = str("analyzer_wrote_list")
     
@@ -1931,7 +1939,7 @@ class ConcluderWriteTool(BaseTool):
         super().__init__()
         self.store = store
         self.metadata_store = metadata_store
-        # self.user_id = "admin"
+        # self.run_scope = _require_run_scope()
         # self.application_context = "exp-plans" 
         # self.namespace = (self.user_id, self.application_context) # just a random namespace name for now
     
@@ -1949,9 +1957,9 @@ class ConcluderWriteTool(BaseTool):
         Use the tool.
         """
         
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-sched" 
-        sched_namespace = (user_id, application_context) # just a random namespace name for now
+        sched_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         memory_id = str("concluder_wrote_list")
     
@@ -1994,7 +2002,7 @@ class UserInputRouterWriteTool(BaseTool):
         super().__init__()
         self.store = store
         self.metadata_store = metadata_store
-        # self.user_id = "admin"
+        # self.run_scope = _require_run_scope()
         # self.application_context = "exp-plans" 
         # self.namespace = (self.user_id, self.application_context) # just a random namespace name for now
     
@@ -2012,9 +2020,9 @@ class UserInputRouterWriteTool(BaseTool):
         Use the tool.
         """
         
-        user_id = "admin"
+        run_scope = _require_run_scope()
         application_context = "exp-sched" 
-        sched_namespace = (user_id, application_context) # just a random namespace name for now
+        sched_namespace = (*run_scope, application_context) # just a random namespace name for now
 
         memory_id = str("user_router_wrote_list")
     

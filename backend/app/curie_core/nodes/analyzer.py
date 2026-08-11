@@ -70,3 +70,8 @@ class Analyzer(BaseNode):
             return self.node_config.transition_objs["correct_and_conclude"]()
         else:
             return self.node_config.transition_objs["otherwise"](completion_messages)
+
+def analyze_structured_execution(result):
+    """Interpret structured execution outputs without guessing metrics from logs."""
+    from backend.app.curie_core.reproduction import analyzer_interpret
+    return analyzer_interpret(result)

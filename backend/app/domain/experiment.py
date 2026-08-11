@@ -75,6 +75,12 @@ class EventType(str, Enum):
     RUN_STATUS_CHANGED = "run_status_changed"
     AGENT_STARTED = "agent_started"
     AGENT_FINISHED = "agent_finished"
+    PLAN_CREATED = "plan_created"
+    PLAN_UPDATED = "plan_updated"
+    COMMAND_STARTED = "command_started"
+    COMMAND_FINISHED = "command_finished"
+    PATCH_CREATED = "patch_created"
+    VALIDATION_RESULT = "validation_result"
     LOG = "log"
     METRIC = "metric"
     ARTIFACT_CREATED = "artifact_created"
@@ -245,6 +251,24 @@ class RunRequest(DomainModel):
     environment: EnvironmentSpecification = Field(default_factory=EnvironmentSpecification)
     resources: ResourceRequest = Field(default_factory=ResourceRequest)
     runtime_options: RuntimeOptions = Field(default_factory=RuntimeOptions)
+    planner_decisions: tuple[SerializeAsAny[DomainModel], ...] = ()
+    expected_claims: tuple[SerializeAsAny[DomainModel], ...] = ()
+
+    @model_validator(mode="after")
+    def references_match_experiment(self) -> RunRequest:
+        decision_ids = {
+            getattr(item, "decision_id", None) for item in self.planner_decisions
+        }
+        claim_ids = {getattr(item, "id", None) for item in self.expected_claims}
+        if not set(self.experiment.provenance_decision_ids) <= decision_ids:
+            raise ValueError("run request is missing planner decisions")
+        if not set(self.experiment.expected_claim_ids) <= claim_ids:
+            raise ValueError("run request is missing expected claims")
+        if self.repository_source != self.experiment.repository:
+            raise ValueError(
+                "run request repository source must match the experiment specification"
+            )
+        return self
 
 
 class Metric(DomainModel):
@@ -290,6 +314,20 @@ class StatusChangedPayload(DomainModel):
 class AgentEventPayload(DomainModel):
     agent_name: NonEmptyStr
     message: NonEmptyStr | None = None
+    experiment_id: NonEmptyStr | None = None
+    component_type: NonEmptyStr = "agent"
+
+class PlanEventPayload(DomainModel):
+    experiment_id:NonEmptyStr;plan_id:NonEmptyStr;summary:NonEmptyStr;revision:int=Field(default=1,ge=1)
+
+class CommandEventPayload(DomainModel):
+    experiment_id:NonEmptyStr;command_id:NonEmptyStr;program:NonEmptyStr;status:NonEmptyStr;exit_code:int|None=None;duration_seconds:float|None=Field(default=None,ge=0)
+
+class PatchEventPayload(DomainModel):
+    experiment_id:NonEmptyStr;patch_id:NonEmptyStr;summary:NonEmptyStr;accepted:bool
+
+class ValidationEventPayload(DomainModel):
+    experiment_id:NonEmptyStr;validator_name:NonEmptyStr;valid:bool;status:NonEmptyStr;violations:tuple[NonEmptyStr,...]=()
 
 
 class LogPayload(DomainModel):
@@ -320,6 +358,10 @@ RunEventPayload = (
     RunStartedPayload
     | StatusChangedPayload
     | AgentEventPayload
+    | PlanEventPayload
+    | CommandEventPayload
+    | PatchEventPayload
+    | ValidationEventPayload
     | LogPayload
     | Metric
     | Artifact
@@ -347,6 +389,12 @@ class RunEvent(DomainModel):
             EventType.RUN_STATUS_CHANGED: StatusChangedPayload,
             EventType.AGENT_STARTED: AgentEventPayload,
             EventType.AGENT_FINISHED: AgentEventPayload,
+            EventType.PLAN_CREATED: PlanEventPayload,
+            EventType.PLAN_UPDATED: PlanEventPayload,
+            EventType.COMMAND_STARTED: CommandEventPayload,
+            EventType.COMMAND_FINISHED: CommandEventPayload,
+            EventType.PATCH_CREATED: PatchEventPayload,
+            EventType.VALIDATION_RESULT: ValidationEventPayload,
             EventType.LOG: LogPayload,
             EventType.METRIC: Metric,
             EventType.ARTIFACT_CREATED: Artifact,

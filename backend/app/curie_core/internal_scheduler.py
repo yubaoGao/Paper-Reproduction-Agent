@@ -20,7 +20,6 @@ from pydantic import BaseModel, Field
 from collections import deque, defaultdict
 import re
 import json
-import subprocess
 import logging
 
 from . import model
@@ -32,13 +31,14 @@ from .modified_deps.langchain_bash.tool import ShellTool
 from .logger import init_logger
 
 class InternalExperimentScheduler:
-    def __init__(self, store: InMemoryStore, metadata_store: InMemoryStore, State, config: dict):
+    def __init__(self, store: InMemoryStore, metadata_store: InMemoryStore, State, config: dict, execution_port=None):
         self.store = store
         self.metadata_store = metadata_store
         self.State = State
+        self.config = config
+        self.execution_port=execution_port
         self.sched_namespace = self.get_sched_namespace()
         self.plan_namespace = self.get_plan_namespace()
-        self.config = config
         log_filename = f'../{config["log_filename"]}'
         self.curie_logger = init_logger(log_filename)
  
@@ -46,6 +46,11 @@ class InternalExperimentScheduler:
                           self.config["job_name"] or 
                           "project" )   
         self.setup_sched()
+
+    def _execute_legacy_operation(self,argv):
+        if self.execution_port is None:
+            raise RuntimeError("InternalExperimentScheduler execution port is not configured")
+        return self.execution_port.execute_legacy_operation(tuple(argv))
 
     def setup_sched(self):
         memory_id = str("worker_assignment_dict") # Format of this dict: {"worker_name": [(exp_plan_id1, "experimental_group_partition_1"), (exp_plan_id2, "experimental_group_partition_1"), ...]}
@@ -515,16 +520,10 @@ class InternalExperimentScheduler:
         return True
 
     def get_sched_namespace(self):
-        user_id = "admin"
-        application_context = "exp-sched" 
-        sched_namespace = (user_id, application_context) # just a random namespace name for now
-        return sched_namespace
+        return ("run",str(self.config["run_id"]),"experiment",str(self.config["experiment_id"]),"scheduler")
     
     def get_plan_namespace(self):
-        user_id = "admin"
-        application_context = "exp-plans" 
-        plan_namespace = (user_id, application_context) # just a random namespace name for now
-        return plan_namespace
+        return ("run",str(self.config["run_id"]),"experiment",str(self.config["experiment_id"]),"plans")
 
     def get_wrote_list_mem_id(self, verifier_name: str) -> str:
         if verifier_name == "llm_verifier":
@@ -601,7 +600,7 @@ class InternalExperimentScheduler:
                         shutil.rmtree(new_dataset_dir) 
 
                     try:
-                        subprocess.run(["cp", "-r", f"{dataset_dir}",  '/workspace'], check=True)
+                        self._execute_legacy_operation(["cp","-r",str(dataset_dir),"/workspace"])
                         os.rename(os.path.join('/workspace', dataset_name), new_dataset_dir)
                         self.curie_logger.info(f"Copying {dataset_dir} --> {new_dataset_dir} successfully!") 
                     except Exception as e:
@@ -668,41 +667,29 @@ class InternalExperimentScheduler:
                 ]
                 try:
                     # Run the installation command for the current package
-                    result = subprocess.run(
-                        activate_cmd, 
-                        check=True, 
-                        stdout=subprocess.PIPE, 
-                        stderr=subprocess.PIPE, 
-                        text=True
-                    )
+                    result = self._execute_legacy_operation(activate_cmd)
                     successful_packages.append(package)
                     self.curie_logger.info(f"[{i}/{len(packages)}] Successfully installed {package}.")
 
-                except subprocess.CalledProcessError as e:
+                except Exception as e:
                     try:
                         activate_cmd = [
                             "micromamba", "run", "-p", env_path,
                             "pip", "install", package
                         ]
-                        result = subprocess.run(
-                            activate_cmd, 
-                            check=True, 
-                            stdout=subprocess.PIPE, 
-                            stderr=subprocess.PIPE, 
-                            text=True
-                        )
+                        result = self._execute_legacy_operation(activate_cmd)
                         successful_packages.append(package)
-                    except subprocess.CalledProcessError as e: 
-                        failed_packages.append(package) 
-                        self.curie_logger.info(f"Fail to install the packages {package}. Error: {e.stderr}")
-    
+                    except Exception as e:
+                        failed_packages.append(package)
+                        self.curie_logger.info(f"Fail to install the packages {package}. Error: {e}")
+
             self.curie_logger.info(f"Sucessfully install packages: {', '.join(successful_packages)}.")
 
         # FIXME: some use cases may need old versions of Python 
         env_path = os.path.join(work_dir, env_name)
         if not os.path.exists(env_path) and self.config["env_requirements"] is None:
             command = ["micromamba", "create", "-p", env_path, "python=3.12", "-y", "--quiet"]
-            subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._execute_legacy_operation(command)
             try:
                 # Install the packages
                 install_packages(env_path, self.packages_to_install)
@@ -714,7 +701,7 @@ class InternalExperimentScheduler:
         elif self.config["env_requirements"] is not None and os.path.exists(self.config["env_requirements"]):
             
             command = ["micromamba", "create", "-p", env_path, "python=3.12", "-y", "--quiet"]
-            subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._execute_legacy_operation(command)
             self.curie_logger.info(f"Environment requirements file {self.config['env_requirements']} exists. Installing packages.")
             # extract the packages from the env_requirements file
             req_file = '/all' + self.config["env_requirements"]
@@ -765,7 +752,7 @@ class InternalExperimentScheduler:
             try:
                 if old_starter_file_dir and os.path.exists(old_starter_file_dir): 
                     # This will copy only the contents of old_starter_file_dir into new_starter_file_dir, not the directory itself.
-                    subprocess.run(["cp", "-r", old_starter_file_dir,  new_starter_file_dir], check=True)
+                    self._execute_legacy_operation(["cp","-r",old_starter_file_dir,new_starter_file_dir])
 
                     self.curie_logger.info(f"Created 📁 {new_starter_file_dir}. \
                                             Starter files from {old_starter_file_dir.replace('/all/', '')} copied successfully!")
@@ -949,3 +936,7 @@ class InternalSchedulerTool(BaseTool):
     
     def get_concluder_terminate_message(self):
         return "Your task: Some results are incomplete, but you must conclude the experiment now (make sure to set 'is_conclude' to True; 'concluder_log_message' must also make it clear that we must conclude now). Analyze the results per the instructions and provide a detailed breakdown of what the user could do on their own (e.g. propose follow-up experiments)."
+def partition_reproduction_execution(plan):
+    """Reuse Curie's experiment-internal partition boundary for a locked run."""
+    from .reproduction import scheduler_partition
+    return scheduler_partition(plan)

@@ -33,16 +33,16 @@ def get_model_context_length() -> int:
 def get_input_price_per_token() -> float:
     """Get the price per token for input text."""
     model_name = get_model_name()
-    return get_all_price_per_1k_tokens()[model_name]["input"] / 1000
+    return get_all_price_per_1k_tokens().get(model_name,{"input":0.0})["input"] / 1000
 
 def get_output_price_per_token() -> float:
     """Get the price per token for output text."""
     model_name = get_model_name()
-    return get_all_price_per_1k_tokens()[model_name]["output"] / 1000
+    return get_all_price_per_1k_tokens().get(model_name,{"output":0.0})["output"] / 1000
 
 def get_model_name() -> str:
     """Strip provider prefix if present (e.g., "openai/gpt-4" -> "gpt-4")"""
-    current_model = os.environ.get("MODEL", "gpt-4o")
+    current_model = os.environ.get("PRIMARY_MODEL", "deepseek-v4-pro")
     # Strip provider prefix if present (e.g., "openai/gpt-4" -> "gpt-4")
     model_name = current_model.split('/')[-1]
     if "claude" in model_name and "us." in model_name: # example: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
@@ -347,4 +347,3 @@ def load_system_prompt(prompt_path, **kwargs):
     with open(prompt_path, "r") as f:
         template = f.read()
     return template.format(**kwargs)
-    

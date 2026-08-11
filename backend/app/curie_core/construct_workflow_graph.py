@@ -35,7 +35,6 @@ from .nodes.analyzer import Analyzer
 from .nodes.concluder import Concluder
 from .nodes.user_input import UserInput, UserInputRouter
 from .nodes.clarification import Clarification, ClarificationRouter
-from .legacy_reporter import generate_report
 
 # Importing Curie Core must not parse argv, open files, or initialize providers.
 curie_logger = logging.getLogger(__name__)
@@ -50,7 +49,7 @@ class State(TypedDict):
     remaining_steps_display: int # remaining_steps cannot be seen in event.values since it is an Annotated value managed by RemainingStepsManager https://github.com/langchain-ai/langgraph/blob/main/libs/langgraph/langgraph/managed/is_last_step.py
 
 class AllNodes():
-    def __init__(self, log_filename: str, config_filename: str, state: State, store, metadata_store, memory):
+    def __init__(self, log_filename: str, config_filename: str, state: State, store, metadata_store, memory, config_overrides=None):
         self.nodes = {}
         self.State = State
         self.log_filename = log_filename
@@ -58,12 +57,14 @@ class AllNodes():
         self.metadata_store = metadata_store
         self.memory = memory
         self.config_filename = config_filename
+        self.config_overrides = config_overrides or {}
         self.instantiate_nodes()
         self.instantiate_subgraphs()
     
     def instantiate_nodes(self):
         with open(self.config_filename, 'r') as file:
             config_dict = json.load(file)
+        config_dict.update(self.config_overrides)
 
         # Create scheduler node:
         self.sched_node = self.create_sched_node(config_dict) # always create sched node first
@@ -400,7 +401,7 @@ def create_graph_stores():
     memory = MemorySaver()
     return store, metadata_store, memory
 
-def build_graph(State, config_filename):
+def build_graph(State, config_filename, run_id=None, experiment_id=None):
     """
     Build the complete LangGraph workflow.
     
@@ -414,6 +415,8 @@ def build_graph(State, config_filename):
     # Read configuration
     with open(config_filename, 'r') as file:
         config = json.load(file)
+    config["run_id"]=str(run_id or config.get("run_id") or __import__("uuid").uuid4())
+    config["experiment_id"]=str(experiment_id or config.get("experiment_id") or "standalone-curie-experiment")
 
     log_filename = f"../{config['log_filename']}"
     global curie_logger
@@ -428,7 +431,7 @@ def build_graph(State, config_filename):
     # Create graph builder
     graph_builder = StateGraph(State)
 
-    all_nodes = AllNodes(log_filename, config_filename, State, store, metadata_store, memory)
+    all_nodes = AllNodes(log_filename, config_filename, State, store, metadata_store, memory,{"run_id":config["run_id"],"experiment_id":config["experiment_id"]})
 
     # Add scheduler node
     sched_subgraph = all_nodes.get_sched_subgraph()
@@ -550,7 +553,7 @@ def validate_question(question: str) -> bool:
             response = ''
         return valid, response
 
-def stream_graph_updates(graph, user_input: str, config: dict):
+def stream_graph_updates(graph, user_input: str, config: dict, run_id: str, experiment_id: str):
     """
     Stream graph updates during workflow execution.
 
@@ -564,7 +567,7 @@ def stream_graph_updates(graph, user_input: str, config: dict):
     # Prior to user-input interrupt:
     for event in graph.stream(
         {"messages": [("user", user_input)], "is_terminate": False, "is_user_input_done": is_user_input_done}, 
-        {"recursion_limit": max_global_steps, "configurable": {"thread_id": "main_graph_id"}}
+        {"recursion_limit": max_global_steps, "configurable": {"thread_id": f"run:{run_id}:experiment:{experiment_id}:curie"}}
     ):
         print_graph_updates(event, max_global_steps)
     
@@ -573,7 +576,7 @@ def stream_graph_updates(graph, user_input: str, config: dict):
     #     user_input = input("Enter your response: ")
     #     for event in graph.stream(
     #         Command(resume=user_input), 
-    #         {"recursion_limit": max_global_steps, "configurable": {"thread_id": "main_graph_id"}}
+    #         {"recursion_limit": max_global_steps, "configurable": {"thread_id": f"run:{run_id}:experiment:{experiment_id}:curie"}}
     #     ):
     #         print_graph_updates(event, max_global_steps)
 
@@ -600,7 +603,7 @@ def report_all_logs(config_filename: str, config: dict):
                 workspace_dir = plan['workspace_dir'].replace('/', '', 1)
                 workspace_dir_list.append(workspace_dir) 
         # if config['report'] == True:
-        report_filename, result_filename = generate_report(config, plans)
+        report_filename, result_filename = "disabled", "disabled"
         curie_logger.info(f"📝 Experiment report saved to {report_filename[1:]}")
         curie_logger.info(f"📊 Experiment results saved to {result_filename[1:]}")
     
@@ -627,8 +630,13 @@ def main():
     config_filename = sys.argv[1]
 
     try:
+        with open(config_filename,"r") as scope_file:
+            scope_config=json.load(scope_file)
+        run_id=str(scope_config.get("run_id") or __import__("uuid").uuid4())
+        experiment_id=str(scope_config.get("experiment_id") or "standalone-curie-experiment")
+        tool.configure_run_scope(run_id,experiment_id)
         # Build graph
-        graph, metadata_store, config = build_graph(State, config_filename)
+        graph, metadata_store, config = build_graph(State, config_filename, run_id, experiment_id)
 
         # Read question from file
         exp_plan_filename = f"/all{config['exp_plan_filename']}"
@@ -636,11 +644,11 @@ def main():
         # if not valid:
         #     curie_logger.error(f"⚠️ Invalid question. Please input a valid research question.\n{user_input}")
         #     sys.exit(0)
-        sched_namespace = ("admin", "exp-sched")
+        sched_namespace = ("run", run_id, "experiment", experiment_id, "scheduler")
         metadata_store.put(sched_namespace, "question", user_input)
 
         # Stream graph updates
-        stream_graph_updates(graph, user_input, config)
+        stream_graph_updates(graph, user_input, config, run_id, experiment_id)
         report_all_logs(config_filename, config)
 
     except Exception as e:

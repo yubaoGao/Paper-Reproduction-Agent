@@ -8,7 +8,6 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_core.messages import HumanMessage, SystemMessage
 
 import os
-import subprocess
 import filecmp
 import json
 
@@ -17,6 +16,11 @@ from .. import utils
 from .. import tool
 
 from ..logger import init_logger
+
+_command_execution_port=None
+def configure_command_execution_port(port):
+    global _command_execution_port
+    _command_execution_port=port
 
 def setup_exec_validator_logging(log_filename: str):
     global curie_logger 
@@ -124,19 +128,15 @@ def run_control_experiment_and_rename(iteration, control_experiment_filename, co
             # enter the conda env
             workspace_dir = os.path.dirname(control_experiment_filename) 
             
-            command = f"""
-            eval "$(micromamba shell hook --shell bash)" &&
-            micromamba activate {workspace_dir}/venv && 
-            bash {control_experiment_filename}
-            """
-            # TODO: instruction to install package in micromamba
+            if _command_execution_port is None:
+                raise RuntimeError("ExecValidator command execution port is not configured")
             try:
-                result = subprocess.run(["bash", "-c", command], capture_output=True, text=True, timeout=timeout)
+                result = _command_execution_port.execute_control_script(control_experiment_filename=control_experiment_filename,workspace_reference=workspace_dir,timeout_seconds=timeout)
                 curie_logger.info(f"ExecVerifier: {result.stdout}")
-            except subprocess.TimeoutExpired:   
+            except TimeoutError:
                 curie_logger.info(f"ExecVerifier: {timeout}s timeout for long running script {control_experiment_filename}.")
-                no_error = True
-                verifier_log_message = f"No error found, but timeout for {control_experiment_filename}."
+                no_error = False
+                verifier_log_message = f"Execution timed out for {control_experiment_filename}; result is indeterminate."
                 return no_error, verifier_log_message, result_file_content
             
             if result.returncode != 0:
@@ -180,3 +180,8 @@ def compare_results(file1, file2):
     else:
         curie_logger.info("ExecVerifier: Error: The files are not identical.")
         return False
+
+def validate_structured_execution(result):
+    """Execution-layer validation used by the production port-based runtime."""
+    from backend.app.curie_core.reproduction import exec_validate
+    return exec_validate(result)

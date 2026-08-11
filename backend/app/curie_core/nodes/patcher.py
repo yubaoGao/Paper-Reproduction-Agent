@@ -76,3 +76,8 @@ class Patcher(BaseNode):
             for task_details in completion_messages:
                 self.sched_node.assign_verifier("analyzer", task_details)
             return self.node_config.transition_objs["after_patch_verifier"](completion_messages)
+
+def validate_reproduction_patch(guard,context,proposed_values):
+    """Prevent patches from mutating planner-authoritative constraints."""
+    from backend.app.curie_core.reproduction import patcher_guard
+    return patcher_guard(guard,context,proposed_values)

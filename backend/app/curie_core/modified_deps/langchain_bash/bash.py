@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import platform
 import re
-import subprocess
 from typing import TYPE_CHECKING, List, Union
 from uuid import uuid4
 
@@ -50,6 +49,7 @@ class BashProcess:
         strip_newlines: bool = False,
         return_err_output: bool = False,
         persistent: bool = False,
+        command_execution_port=None,
     ):
         """
         Initializes with default settings
@@ -58,9 +58,9 @@ class BashProcess:
         self.return_err_output = return_err_output
         self.prompt = ""
         self.process = None
+        self.command_execution_port=command_execution_port
         if persistent:
-            self.prompt = str(uuid4())
-            self.process = self._initialize_persistent_process(self, self.prompt)
+            raise RuntimeError("Persistent host shells are not supported by Curie Core; configure CommandExecutionPort")
 
     @staticmethod
     def _lazy_import_pexpect() -> pexpect:
@@ -112,13 +112,10 @@ class BashProcess:
         """
         if isinstance(commands, str):
             commands = [commands]
-        commands = ";".join(commands)
-        if self.process is not None:
-            return self._run_persistent(
-                commands,
-            )
-        else:
-            return self._run(commands, timeout)
+        if self.command_execution_port is None:
+            raise RuntimeError("CommandExecutionPort is not configured")
+        result=self.command_execution_port.execute_legacy_shell_commands(tuple(commands),timeout_seconds=timeout)
+        return result.stdout or result.stderr or ""
 
     def _run(self, command: str, timeout: int) -> str:
         """
@@ -128,22 +125,7 @@ class BashProcess:
         Args:
             command: The command to run
         """
-        try:
-            output = subprocess.run(
-                command,
-                shell=True,
-                check=True,
-                timeout=timeout,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            ).stdout.decode()
-        except subprocess.CalledProcessError as error:
-            if self.return_err_output:
-                return error.stdout.decode()
-            return str(error)
-        if self.strip_newlines:
-            output = output.strip()
-        return output
+        raise RuntimeError("Direct shell execution was removed; use CommandExecutionPort")
 
     def process_output(self, output: str, command: str) -> str:
         """

@@ -177,3 +177,9 @@ class Architect(BaseNode):
             return {"messages": [response], "prev_agent": self.node_config.name}
         
         return Node
+
+def create_reproduction_execution_plan(context):
+    """Reuse Architect planning semantics without redefining the target."""
+    from backend.app.curie_core.reproduction import architect_plan
+    locked={item.key:item.value for item in context.constraints.items if item.level.value=="locked"}
+    return architect_plan(context,locked)

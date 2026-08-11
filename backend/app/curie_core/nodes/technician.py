@@ -102,3 +102,8 @@ class Technician(BaseNode):
 
     # TODO: remove context if one plan is finished    
     # def _create_model_response(self, system_prompt_file):    
+
+def prepare_reproduction_command(context,workspace,timeout_seconds):
+    """Prepare an approved structured command for CommandExecutionPort."""
+    from backend.app.curie_core.reproduction import technician_command
+    return technician_command(context,workspace,timeout_seconds)

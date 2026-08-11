@@ -11,6 +11,16 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from . import utils
 
 from .logger import init_logger
+_llm_factory=None
+def configure_llm_factory(factory):
+    global _llm_factory
+    _llm_factory=factory
+def _platform_llm_factory():
+    global _llm_factory
+    if _llm_factory is None:
+        from backend.app.llm import CurieLLMFactory,LLMPlatformSettings
+        _llm_factory=CurieLLMFactory(LLMPlatformSettings.from_env())
+    return _llm_factory
 def setup_model_logging(log_filename: str):
     global curie_logger 
     curie_logger = init_logger(log_filename)
@@ -125,17 +135,14 @@ class TokenCounter:
         self._accumulated_cost["output"] += costs["output"]
 
 def create_model():
-    return ChatLiteLLM(model=os.environ.get("MODEL")) 
+    return _platform_llm_factory().create_chat_model("CurieCore")
 
 def create_completion(messages: List[BaseMessage], tools: List = None) -> Any:
     """Create a completion using LiteLLM"""
     try:
-        chat = ChatLiteLLM(model=os.environ.get("MODEL"))
+        chat = create_model()
         if tools:
-            if "anthropic" in os.environ.get("MODEL"):
-                chat = chat.bind_tools(tools)
-            else:
-                chat = chat.bind_tools(tools, parallel_tool_calls=False) # disabling for gpt models
+            chat = chat.bind_tools(tools, parallel_tool_calls=False)
         messages = format_messages(messages)
         return chat.invoke(messages)
     except Exception as e:

@@ -89,3 +89,8 @@ class LLMValidator(BaseNode):
             for task_details in completion_messages:
                 self.sched_node.assign_verifier("analyzer", task_details)
             return self.node_config.transition_objs["after_exec_verifier"](completion_messages)
+
+def validate_reproduction_plan(guard,context,locked_snapshot):
+    """Run the deterministic reproduction guard before semantic validation."""
+    from backend.app.curie_core.reproduction import llm_validator_guard
+    return llm_validator_guard(guard,context,locked_snapshot)
