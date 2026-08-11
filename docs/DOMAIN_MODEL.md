@@ -7,6 +7,10 @@ planning, job orchestration, runtimes, APIs, persistence and UI layers. These
 models contain validation only: they do not clone repositories, download data,
 upload artifacts, open files or start experiments.
 
+Task 03 adds the preceding paper-semantic `ReproductionSpecification` layer.
+See [`REPRODUCTION_SPEC.md`](REPRODUCTION_SPEC.md) for its provenance, claims,
+unknown information and one-to-many experiment planning boundary.
+
 ```mermaid
 flowchart LR
     Specification[ExperimentSpecification] -->|one specification, many attempts| Run[ExperimentRun]
