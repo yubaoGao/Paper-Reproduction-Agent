@@ -22,6 +22,8 @@ setup(
         "tree-sitter-javascript>=0.25,<1",
         "tree-sitter-typescript>=0.23,<1",
         "typing-extensions>=4.12",
+        "packaging>=24,<27",
+        "docker>=7,<8",
     ],
     author="PaperReproAgent contributors",
     description="AI paper experiment reproduction platform",

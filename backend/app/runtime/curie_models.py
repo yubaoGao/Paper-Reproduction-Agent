@@ -115,6 +115,8 @@ class CommandExecutionResult(DomainModel):
     exit_code: int | None = None
     stdout: NonEmptyStr | None = None
     stderr: NonEmptyStr | None = None
+    stdout_reference: NonEmptyStr | None = None
+    stderr_reference: NonEmptyStr | None = None
     duration_seconds: float = Field(ge=0)
     metrics: tuple[Metric, ...] = ()
     artifacts: tuple[Artifact, ...] = ()

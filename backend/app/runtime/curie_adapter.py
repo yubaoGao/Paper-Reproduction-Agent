@@ -30,6 +30,7 @@ class CurieRuntimeAdapter:
         state_store_factory=None,
         checkpoint_factory=None,
         translator=None,
+        metadata_port=None,
         max_attempts: int = 2,
     ) -> None:
         if max_attempts < 1:
@@ -43,6 +44,9 @@ class CurieRuntimeAdapter:
         )
         self.checkpoint_factory = checkpoint_factory or InMemoryCheckpointFactory()
         self.translator = translator or CurieInputTranslator()
+        self.metadata_port = metadata_port or (
+            workspace_port if hasattr(workspace_port, "metadata") else None
+        )
         self.max_attempts = max_attempts
 
     def translate_request(self, request: RunRequest) -> CurieExecutionContext:
@@ -103,11 +107,21 @@ class CurieRuntimeAdapter:
                 finished_at=now,
             )
 
-        result = self.translate_result(curie_result)
+        runtime_metadata = {}
+        if self.metadata_port is not None:
+            try:
+                runtime_metadata = self.metadata_port.metadata(request.run_id)
+            except KeyError:
+                runtime_metadata = {}
+        result = self.translate_result(curie_result, runtime_metadata)
         bridge.terminal(result.status, result.error, result.exit_code)
         return result
 
-    def translate_result(self, value: CurieExecutionResult) -> RunResult:
+    def translate_result(
+        self,
+        value: CurieExecutionResult,
+        runtime_metadata: dict | None = None,
+    ) -> RunResult:
         metadata = {
             "runtime": "curie",
             "experiment_id": value.experiment_id,
@@ -123,6 +137,7 @@ class CurieRuntimeAdapter:
             "agent_trace": [
                 item.model_dump(mode="json") for item in value.agent_trace
             ],
+            **dict(runtime_metadata or {}),
         }
         return RunResult(
             run_id=value.run_id,

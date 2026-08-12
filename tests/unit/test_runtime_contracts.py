@@ -12,6 +12,7 @@ from backend.app.domain import (
 )
 from backend.app.runtime import (
     CurieRuntimeAdapter,
+    ExecutionBackendUnavailableError,
     ExperimentRuntime,
     InMemoryEventSink,
     RunEventSink,
@@ -66,9 +67,10 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertIsInstance(adapter, ExperimentRuntime)
         self.assertEqual(translated.run_id, request.run_id)
         self.assertEqual(translated.experiment_id, request.experiment.id)
-        self.assertEqual(translated.command, ("python", "train.py"))
+        self.assertEqual(translated.command.program, "python")
+        self.assertEqual(translated.command.arguments, ("train.py",))
 
-        with self.assertRaisesRegex(NotImplementedError, "intentionally deferred"):
+        with self.assertRaisesRegex(ExecutionBackendUnavailableError, "not configured"):
             adapter.run(request, InMemoryEventSink())
 
 

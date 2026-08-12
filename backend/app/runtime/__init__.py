@@ -9,7 +9,7 @@ from .curie_models import *
 from .event_bridge import CurieEventBridge
 from .guard import ExperimentSpecificationGuard,SpecificationGuardResult,SpecificationViolation,SpecificationViolationError
 from .llm_factory import CurieLLMFactory
-from .ports import ArtifactCollectionPort,CodingAgentPort,CommandExecutionPort,ExecutionBackendUnavailableError,WorkspacePort
+from .ports import ArtifactCollectionPort,CodingAgentPort,CommandExecutionPort,ExecutionBackendUnavailableError,RuntimeMetadataPort,WorkspacePort
 from .state import CheckpointFactory,CurieStateStore,CurieStateStoreFactory,InMemoryCheckpointFactory,InMemoryCurieStateStore,InMemoryCurieStateStoreFactory,run_namespace,run_thread_id
 from .translation import CurieInputTranslator
 from .workflow import CurieReproductionWorkflow
@@ -22,7 +22,7 @@ __all__ = [
     "RunEventSink",
     "RunRequest",
     "RunResult",
-    "ArtifactCollectionPort","CodingAgentPort","CommandExecutionPort","ExecutionBackendUnavailableError","WorkspacePort",
+    "ArtifactCollectionPort","CodingAgentPort","CommandExecutionPort","ExecutionBackendUnavailableError","RuntimeMetadataPort","WorkspacePort",
     "CurieEventBridge","CurieInputTranslator","CurieReproductionWorkflow","ExperimentSpecificationGuard","SpecificationGuardResult","SpecificationViolation","SpecificationViolationError","CurieLLMFactory",
     "CheckpointFactory","CurieStateStore","CurieStateStoreFactory","InMemoryCheckpointFactory","InMemoryCurieStateStore","InMemoryCurieStateStoreFactory","run_namespace","run_thread_id",
 ]

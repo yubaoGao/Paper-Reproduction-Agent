@@ -40,3 +40,8 @@ class ArtifactCollectionPort(Protocol):
         context: CurieExecutionContext,
         workspace: WorkspaceReferences,
     ) -> tuple[Artifact, ...]: ...
+
+
+@runtime_checkable
+class RuntimeMetadataPort(Protocol):
+    def metadata(self, run_id: str) -> dict: ...
