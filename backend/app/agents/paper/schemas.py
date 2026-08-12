@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 from backend.app.domain import (
     CatalogEntity, EvidenceReference, ExtractionTrace, FigureObservation, PaperClaim,
-    PaperExperimentCatalog, PaperExperimentRecord, ReproductionParameter,
+    EvaluationPolicy, PaperExperimentCatalog, PaperExperimentRecord, ReproductionParameter,
 )
 from backend.app.llm import LLMCallMetadata
 
@@ -30,6 +30,7 @@ class StageExtraction(BaseModel):
     experiments: tuple[PaperExperimentRecord,...]=()
     training_parameters: tuple[ReproductionParameter,...]=()
     evaluation_parameters: tuple[ReproductionParameter,...]=()
+    evaluation_policy: EvaluationPolicy|None=None
     claims: tuple[PaperClaim,...]=()
     evidence: tuple[EvidenceReference,...]=()
     missing_components: tuple[str,...]=()

@@ -15,7 +15,7 @@ from .prompt_registry import AlignmentPromptRegistry
 from .schemas import AlignmentCatalogReview,AlignmentResult,AlignmentStageExtraction
 
 class PaperCodeAlignmentAgent:
-    STAGES=("dataset_model","experiment","association","parameters","ablations","metrics","conflicts")
+    STAGES=("dataset_model","experiment","association","parameters","ablations","metrics","evaluation_policy","conflicts")
     def __init__(self,router:LLMRouter,*,settings=None,candidate_generator=None,prompts=None,evidence_validator=None,catalog_validator=None):
         self.router=router;self.settings=settings or AlignmentSettings();self.prompts=prompts or AlignmentPromptRegistry();self.candidates=candidate_generator or AlignmentCandidateGenerator(self.settings.max_candidates_per_experiment);self.deterministic=DeterministicAlignmentBuilder();self.evidence=evidence_validator or AlignmentEvidenceValidator();self.validator=catalog_validator or PaperCodeAlignmentValidator(self.evidence);self.merger=AlignmentCatalogMerger();self.context=AlignmentContextBuilder(router,self.prompts,max_items=self.settings.max_context_items,max_chars=self.settings.max_context_chars,fast_threshold=self.settings.fast_candidate_threshold)
     def align(self,paper_catalog,repository_catalog,*,reproduction_specification=None,paper_document=None,repository_snapshot=None,static_analysis=None):
@@ -50,7 +50,7 @@ class PaperCodeAlignmentAgent:
         return None,calls,repairs,f"{name} retry exhaustion: {issue}"
     def _validate_stage(self,stage,paper,repository,paper_document,snapshot,static):
         backing={"paper_document":paper_document,"repository_snapshot":snapshot,"static_analysis":static}
-        for group in (stage.experiment_alignments,stage.dataset_mappings,stage.model_mappings,stage.parameter_mappings,stage.ablation_mappings,stage.metric_mappings):
+        for group in (stage.experiment_alignments,stage.dataset_mappings,stage.model_mappings,stage.parameter_mappings,stage.ablation_mappings,stage.metric_mappings,stage.evaluation_policy_alignments):
             for mapping in group:self.evidence.validate_mapping(mapping,paper,repository,**backing)
         for conflict in stage.conflicts:self.evidence.validate(tuple(x for candidate in conflict.candidates for x in candidate.evidence),paper,repository,**backing)
     def _review(self,catalog):

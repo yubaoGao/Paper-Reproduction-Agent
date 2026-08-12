@@ -25,7 +25,7 @@ class ReproductionPlannerAgent:
                 selection,metadata,repairs=self._resolve(ambiguous,repository_catalog,alignment_catalog); calls.extend(metadata)
                 semantic={x.paper_experiment_id:{"entrypoint_id":x.entrypoint_id,"config_ids":x.config_ids} for x in selection.selections}
             plan=self.builder.build(specification,paper_catalog,repository_catalog,alignment_catalog,policy,overrides,semantic)
-            self.validator.validate(plan,paper_catalog,repository_catalog,alignment_catalog)
+            self.validator.validate(plan,paper_catalog,repository_catalog,alignment_catalog,specification=specification)
             if self.router is not None:
                 try:
                     prompt=self.prompts.get("plan_review")

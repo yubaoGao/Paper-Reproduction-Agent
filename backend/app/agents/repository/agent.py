@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json
 from datetime import datetime,timezone
-from backend.app.domain import RepositoryAnalysisStatus,RepositoryAnalysisTrace
+from backend.app.domain import EvidenceReference,RepositoryAnalysisStatus,RepositoryAnalysisTrace
 from backend.app.infrastructure.repository import DefaultRepositorySnapshotBuilder,GitRepositoryResolver,RepositoryStaticAnalyzer
 from backend.app.llm import LLMRole,LLMRouter
 from backend.app.services import RepositoryAnalysisError,RepositoryAnalysisSettings
@@ -53,7 +53,11 @@ class RepositoryAnalyzerAgent:
         return None,calls,repairs,f"{name} retry exhaustion: {issue}"
     def _validate_stage(self,stage,snapshot,static):
         evidence=list(stage.evidence)
-        for item in (*stage.components,*stage.implementations):evidence.extend(item.evidence)
+        for item in (*stage.components,*stage.implementations,*stage.evaluation_policies):evidence.extend(item.evidence)
+        for item in stage.evaluation_policies:
+            for value in item.policy.evidence:
+                try:evidence.append(value if isinstance(value,EvidenceReference) else EvidenceReference.model_validate(value))
+                except Exception as exc:raise ValueError(f"invalid evaluation policy evidence: {item.policy_id}") from exc
         for conflict in stage.conflicts:
             for candidate in conflict.candidates:evidence.extend(candidate.evidence)
         for fact in stage.facts:evidence.extend(fact.evidence)

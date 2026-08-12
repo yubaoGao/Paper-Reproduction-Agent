@@ -34,7 +34,40 @@ def create_reproduction_run(plan: ReproductionExecutionPlan, run_id: str) -> Rep
             "execution_order must cover every experiment exactly and define manifest order"
         )
     dependency_values = {item.experiment_id: item.depends_on_experiment_ids for item in plan.dependencies}
-    dependencies = {step_id: tuple(dependency_values.get(step_id, ())) for step_id in experiment_ids}
+    by_id = {item.id: item for item in plan.experiments}
+    action_mode = any(item.action_plan is not None for item in plan.experiments)
+    if action_mode and any(item.action_plan is None for item in plan.experiments):
+        raise ExecutionPlanAdmissionError("action-plan execution cannot mix planned and legacy steps")
+    if action_mode:
+        step_ids = tuple(
+            action_id
+            for experiment_id in experiment_ids
+            for action_id in by_id[experiment_id].action_plan.execution_order
+        )
+        action_owner = {
+            action.action_id: (experiment, action)
+            for experiment in plan.experiments
+            for action in experiment.action_plan.actions
+        }
+        dependencies = {}
+        for step_id in step_ids:
+            experiment, action = action_owner[step_id]
+            parents = list(action.depends_on_action_ids)
+            if not parents:
+                for parent_experiment_id in dependency_values.get(experiment.id, ()):
+                    parents.append(by_id[parent_experiment_id].action_plan.final_action_id)
+            dependencies[step_id] = tuple(dict.fromkeys(parents))
+        required_final_result_step_ids = tuple(
+            by_id[experiment_id].action_plan.final_action_id for experiment_id in experiment_ids
+        )
+    else:
+        step_ids = experiment_ids
+        dependencies = {step_id: tuple(dependency_values.get(step_id, ())) for step_id in experiment_ids}
+        action_owner = {}
+        required_final_result_step_ids = tuple(
+            item.id for item in plan.experiments
+            if bool(item.metadata.get("requires_final_result"))
+        )
     serialized = plan.model_dump(mode="json")
     digest = hashlib.sha256(
         json.dumps(serialized, sort_keys=True, separators=(",", ":")).encode()
@@ -44,24 +77,30 @@ def create_reproduction_run(plan: ReproductionExecutionPlan, run_id: str) -> Rep
         reproduction_specification_id=plan.reproduction_specification_id,
         repository_snapshot_id=plan.repository_snapshot_id,
         resolved_commit_sha=plan.resolved_commit_sha,
-        ordered_step_ids=experiment_ids,
+        ordered_step_ids=step_ids,
         dependencies=dependencies,
+        required_final_result_step_ids=required_final_result_step_ids,
         plan_digest=f"sha256:{digest}",
     )
-    by_id = {item.id: item for item in plan.experiments}
-    steps = tuple(
-        StepRun(
-            step_id=experiment.id,
-            experiment_id=experiment.id,
-            depends_on_step_ids=dependencies[experiment.id],
-            priority=_priority(experiment.metadata),
-            control_first=(
-                "control" in {item.casefold() for item in experiment.tags}
-                or str(experiment.metadata.get("group", "")).casefold() == "control"
-            ),
+    if action_mode:
+        steps=tuple(
+            StepRun(step_id=step_id,experiment_id=action_owner[step_id][0].id,action_type=action_owner[step_id][1].action_type,seed=action_owner[step_id][1].seed,depends_on_step_ids=dependencies[step_id],priority=_priority(action_owner[step_id][0].metadata),control_first=("control" in {item.casefold() for item in action_owner[step_id][0].tags} or str(action_owner[step_id][0].metadata.get("group","")).casefold()=="control"))
+            for step_id in step_ids
         )
-        for experiment in (by_id[step_id] for step_id in experiment_ids)
-    )
+    else:
+        steps = tuple(
+            StepRun(
+                step_id=experiment.id,
+                experiment_id=experiment.id,
+                depends_on_step_ids=dependencies[experiment.id],
+                priority=_priority(experiment.metadata),
+                control_first=(
+                    "control" in {item.casefold() for item in experiment.tags}
+                    or str(experiment.metadata.get("group", "")).casefold() == "control"
+                ),
+            )
+            for experiment in (by_id[step_id] for step_id in experiment_ids)
+        )
     return ReproductionRun(
         run_id=run_id,
         plan_id=plan.plan_id,

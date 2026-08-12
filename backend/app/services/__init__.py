@@ -22,6 +22,7 @@ from .repository_analysis import (
 from .alignment import AlignmentSettings,AlignmentValidationError,PaperCodeAlignmentError
 from .planning import PlanningSettings,PlanningValidationError,ReproductionPlanningError
 from .reproduction_intake import ReproductionIntakeError,ReproductionIntakeService
+from .result_resolution import CanonicalResultResolver,RepositoryResultAdapter,ResultResolutionRequest,ResultResolver,aggregate_final_result
 
 __all__ = [
     "CompositePaperParser",
@@ -42,4 +43,5 @@ __all__ = [
     "AlignmentSettings","AlignmentValidationError","PaperCodeAlignmentError",
     "PlanningSettings","PlanningValidationError","ReproductionPlanningError",
     "ReproductionIntakeError","ReproductionIntakeService",
+    "CanonicalResultResolver","RepositoryResultAdapter","ResultResolutionRequest","ResultResolver","aggregate_final_result",
 ]

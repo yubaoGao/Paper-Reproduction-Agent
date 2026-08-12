@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 from pydantic import Field,JsonValue,model_validator
-from .experiment import DomainModel,ExperimentSpecification,NonEmptyStr
+from .experiment import DomainModel,EvaluationPolicy,ExperimentSpecification,NonEmptyStr
 from .reproduction import EvidenceReference,PaperReference
 from .repository import RepositoryReference
 
@@ -23,7 +23,7 @@ class ExperimentDependency(DomainModel):
         return self
 class UnresolvedPlanItem(DomainModel):item_id:NonEmptyStr;category:NonEmptyStr;paper_experiment_id:NonEmptyStr|None=None;reason:NonEmptyStr;candidate_ids:tuple[NonEmptyStr,...]=();requires_confirmation:bool=False
 class PlanningOverrides(DomainModel):
-    parameters:dict[NonEmptyStr,JsonValue]=Field(default_factory=dict);dataset_bindings:dict[NonEmptyStr,NonEmptyStr]=Field(default_factory=dict);entrypoint_ids:dict[NonEmptyStr,NonEmptyStr]=Field(default_factory=dict);config_ids:dict[NonEmptyStr,tuple[NonEmptyStr,...]]=Field(default_factory=dict);dependencies:dict[NonEmptyStr,tuple[NonEmptyStr,...]]=Field(default_factory=dict)
+    parameters:dict[NonEmptyStr,JsonValue]=Field(default_factory=dict);dataset_bindings:dict[NonEmptyStr,NonEmptyStr]=Field(default_factory=dict);entrypoint_ids:dict[NonEmptyStr,NonEmptyStr]=Field(default_factory=dict);config_ids:dict[NonEmptyStr,tuple[NonEmptyStr,...]]=Field(default_factory=dict);dependencies:dict[NonEmptyStr,tuple[NonEmptyStr,...]]=Field(default_factory=dict);evaluation_policies:dict[NonEmptyStr,EvaluationPolicy]=Field(default_factory=dict)
 class PlanningMetadata(DomainModel):stages_completed:tuple[NonEmptyStr,...]=();warnings:tuple[NonEmptyStr,...]=();prompt_versions:dict[NonEmptyStr,NonEmptyStr]=Field(default_factory=dict)
 class ReproductionExecutionPlan(DomainModel):
     plan_id:NonEmptyStr;reproduction_specification_id:NonEmptyStr;paper:PaperReference;repository:RepositoryReference;repository_snapshot_id:NonEmptyStr;resolved_commit_sha:NonEmptyStr;alignment_catalog_id:NonEmptyStr;policy:ReproductionPolicy;target_experiment_ids:tuple[NonEmptyStr,...];experiments:tuple[ExperimentSpecification,...]=();execution_order:tuple[NonEmptyStr,...]=();dependencies:tuple[ExperimentDependency,...]=();shared_settings:dict[NonEmptyStr,JsonValue]=Field(default_factory=dict);warnings:tuple[NonEmptyStr,...]=();blockers:tuple[PlanBlocker,...]=();decisions:tuple[PlannerDecision,...]=();unresolved_items:tuple[UnresolvedPlanItem,...]=();status:PlanStatus;metadata:PlanningMetadata

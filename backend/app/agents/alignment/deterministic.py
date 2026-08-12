@@ -18,7 +18,7 @@ def _evidence(records):return tuple(dict.fromkeys(x for record in records for x 
 
 @dataclass(frozen=True)
 class DeterministicAlignment:
-    experiments:tuple[ExperimentAlignmentRecord,...];datasets:tuple[DatasetAlignment,...];models:tuple[ModelAlignment,...];parameters:tuple[ParameterAlignment,...];ablations:tuple[AblationAlignment,...];metrics:tuple[MetricAlignment,...];conflicts:tuple[AlignmentConflict,...];unmatched_paper:tuple[UnmatchedAlignmentItem,...];unmatched_repository:tuple[UnmatchedAlignmentItem,...]
+    experiments:tuple[ExperimentAlignmentRecord,...];datasets:tuple[DatasetAlignment,...];models:tuple[ModelAlignment,...];parameters:tuple[ParameterAlignment,...];ablations:tuple[AblationAlignment,...];metrics:tuple[MetricAlignment,...];evaluation_policies:tuple[EvaluationPolicyAlignment,...];conflicts:tuple[AlignmentConflict,...];unmatched_paper:tuple[UnmatchedAlignmentItem,...];unmatched_repository:tuple[UnmatchedAlignmentItem,...]
 
 class AlignmentConfidenceScorer:
     """Scores evidence signals, not statistical probabilities."""
@@ -37,6 +37,20 @@ class DeterministicAlignmentBuilder:
         ablations=self._ablations(paper,repository,candidates)
         metrics,metric_conflicts=self._metrics(paper,repository)
         experiments,experiment_conflicts=self._experiments(paper,repository,candidates,datasets,models,parameters,ablations,metrics)
+        evaluation_policies,evaluation_conflicts=self._evaluation_policies(paper,repository,experiments)
+        evaluation_by_experiment={x.paper_experiment_id:x for x in evaluation_policies}
+        updated_experiments=[]
+        for item in experiments:
+            evaluation=evaluation_by_experiment[item.paper_experiment_id]
+            conflict_ids=item.conflict_ids
+            if evaluation.conflict_id is not None:
+                conflict_ids=tuple(dict.fromkeys((*conflict_ids,evaluation.conflict_id)))
+            updated_experiments.append(item.model_copy(update={
+                "evaluation_policy_alignment_id":evaluation.alignment_id,
+                "conflict_ids":conflict_ids,
+                "status":AlignmentStatus.CONFLICTED if evaluation.conflict_id and item.status is not AlignmentStatus.AMBIGUOUS else item.status,
+            }))
+        experiments=tuple(updated_experiments)
         used={x for record in experiments for x in record.repository_implementation_ids}
         unmatched_paper=[]
         for record in experiments:
@@ -58,7 +72,7 @@ class DeterministicAlignmentBuilder:
             source_conflicts.append(AlignmentConflict(conflict_id=stable_id("conflict","repository",item.conflict_id),semantic_key=f"repository:{item.semantic_key}",conflict_type=AlignmentConflictType.DOCUMENTATION_CODE_CONFLICT if item.conflict_type is RepositoryConflictType.DOCUMENTATION_CODE else AlignmentConflictType.OTHER,candidates=tuple(AlignmentConflictCandidate(source=AlignmentItemSource.REPOSITORY,value=x.value,evidence=x.evidence) for x in item.candidates),status=AlignmentConflictStatus.RESOLVED if item.status is RepositoryConflictStatus.RESOLVED else AlignmentConflictStatus.UNRESOLVED,resolution=item.resolution,reasoning=item.reasoning or "preserved repository-source conflict"))
         for item in paper.conflicts:
             source_conflicts.append(AlignmentConflict(conflict_id=stable_id("conflict","paper",item.conflict_id),semantic_key=f"paper:{item.semantic_key}",conflict_type=AlignmentConflictType.OTHER,candidates=tuple(AlignmentConflictCandidate(source=AlignmentItemSource.PAPER,value=x.value,evidence=x.evidence) for x in item.candidates),status=AlignmentConflictStatus.RESOLVED if item.status.value=="resolved" else AlignmentConflictStatus.UNRESOLVED,resolution=item.resolution,reasoning=item.reasoning or "preserved paper-source conflict"))
-        return DeterministicAlignment(experiments,datasets,models,parameters,ablations,metrics,(*parameter_conflicts,*metric_conflicts,*experiment_conflicts,*source_conflicts),tuple(unmatched_paper),tuple(unmatched_repository))
+        return DeterministicAlignment(experiments,datasets,models,parameters,ablations,metrics,evaluation_policies,(*parameter_conflicts,*metric_conflicts,*evaluation_conflicts,*experiment_conflicts,*source_conflicts),tuple(unmatched_paper),tuple(unmatched_repository))
     def _entities(self,category,paper_entities,repo_entities,candidates):
         output=[]
         for entity in paper_entities:
@@ -114,6 +128,71 @@ class DeterministicAlignmentBuilder:
                 status=AlignmentStatus.CONFLICTED;conflict_id=stable_id("conflict","metric",key);paper_definition={"aggregation":paper_agg,"split":paper_split};repo_definition={"aggregation":repo_agg,"split":repo_split};conflicts.append(AlignmentConflict(conflict_id=conflict_id,semantic_key=f"metric:{key}:definition",conflict_type=AlignmentConflictType.METRIC_DEFINITION_MISMATCH,candidates=(AlignmentConflictCandidate(source=AlignmentItemSource.PAPER,value=paper_definition,evidence=_evidence(items)),AlignmentConflictCandidate(source=AlignmentItemSource.REPOSITORY,value=repo_definition,evidence=_evidence(matches))),reasoning="metric split or aggregation differs"))
             output.append(MetricAlignment(alignment_id=stable_id("metric",key),paper_metric=items[0].metric_name,paper_claim_ids=tuple(x.id for x in items),repository_metric_ids=tuple(x.component_id for x in matches),status=status,confidence=.9 if len(matches)==1 else (.4 if matches else 0),paper_split=paper_split,repository_split=repo_split,paper_aggregation=paper_agg,repository_aggregation=repo_agg,reasoning="deterministic metric identity, split and aggregation comparison",paper_evidence=_evidence(items),repository_evidence=_evidence(matches),conflict_id=conflict_id))
         return tuple(output),tuple(conflicts)
+    def _evaluation_policies(self,paper,repository,experiments):
+        output=[];conflicts=[];paper_records={x.experiment_id:x for x in paper.experiments}
+        for experiment in experiments:
+            paper_record=paper_records[experiment.paper_experiment_id]
+            paper_policy=paper_record.evaluation_policy or paper.evaluation_policy
+            repository_records=[
+                item for item in repository.evaluation_policies
+                if (item.implementation_id and item.implementation_id in experiment.repository_implementation_ids)
+                or set(item.entrypoint_ids)&set(experiment.entrypoint_ids)
+            ]
+            signatures={self._policy_signature(item.policy) for item in repository_records if item.policy.is_resolved}
+            code_policy=next((item.policy for item in repository_records if item.policy.is_resolved),None) if len(signatures)<=1 else None
+            paper_resolved=paper_policy is not None and paper_policy.is_resolved
+            code_resolved=code_policy is not None and code_policy.is_resolved
+            conflict_id=None
+            if len(signatures)>1:
+                status=EvaluationPolicyAlignmentStatus.AMBIGUOUS;resolved=None;reason="repository contains multiple explicit final-result policies"
+                conflict_id=stable_id("conflict","evaluation-policy",experiment.paper_experiment_id,"ambiguous")
+                conflicts.append(AlignmentConflict(conflict_id=conflict_id,semantic_key=f"evaluation_policy:{experiment.paper_experiment_id}",conflict_type=AlignmentConflictType.EVALUATION_POLICY_CONFLICT,candidates=tuple(AlignmentConflictCandidate(source=AlignmentItemSource.REPOSITORY,value=item.policy.model_dump(mode="json"),evidence=item.evidence) for item in repository_records if item.policy.is_resolved),reasoning=reason))
+            elif paper_resolved and code_resolved and self._policy_signature(paper_policy)!=self._policy_signature(code_policy):
+                status=EvaluationPolicyAlignmentStatus.CONFLICT;resolved=paper_policy;reason="paper is authoritative, but repository behavior deviates and requires an evidenced sandbox adaptation"
+                conflict_id=stable_id("conflict","evaluation-policy",experiment.paper_experiment_id)
+                conflicts.append(AlignmentConflict(conflict_id=conflict_id,semantic_key=f"evaluation_policy:{experiment.paper_experiment_id}",conflict_type=AlignmentConflictType.EVALUATION_POLICY_CONFLICT,candidates=(AlignmentConflictCandidate(source=AlignmentItemSource.PAPER,value=paper_policy.model_dump(mode="json"),evidence=self._policy_evidence(paper_policy)),AlignmentConflictCandidate(source=AlignmentItemSource.REPOSITORY,value=code_policy.model_dump(mode="json"),evidence=self._policy_evidence(code_policy))),reasoning=reason))
+            elif paper_resolved and code_resolved:
+                status=EvaluationPolicyAlignmentStatus.ALIGNED;resolved=paper_policy;reason="paper and repository evaluation policies agree"
+            elif paper_resolved:
+                status=EvaluationPolicyAlignmentStatus.PAPER_ONLY;resolved=paper_policy;reason="paper explicitly defines the final-result policy and code does not"
+            elif code_resolved:
+                status=EvaluationPolicyAlignmentStatus.CODE_FALLBACK;resolved=code_policy;reason="paper is unknown; explicit repository behavior supplies the policy"
+            else:
+                resolved=self._scientific_default(paper_record,paper_policy,paper)
+                if resolved is None:
+                    status=EvaluationPolicyAlignmentStatus.UNKNOWN;reason="neither source defines a complete policy and no safe deterministic scientific default is available"
+                else:
+                    status=EvaluationPolicyAlignmentStatus.SCIENTIFIC_DEFAULT;reason="reporting targets are explicit and FINAL_EPOCH avoids unsupported epoch or test-metric maximization"
+            repository_evidence=tuple(dict.fromkeys(value for item in repository_records for value in (*item.evidence,*self._policy_evidence(item.policy))))
+            adaptation_supported=bool(repository_records) and all(item.paper_policy_adaptation_supported for item in repository_records) if status is EvaluationPolicyAlignmentStatus.CONFLICT else False
+            alignment_warnings=("REPOSITORY_EVALUATION_DEVIATION",) if status is EvaluationPolicyAlignmentStatus.CONFLICT else (("INFERRED_EVALUATION_POLICY",) if status is EvaluationPolicyAlignmentStatus.SCIENTIFIC_DEFAULT else ())
+            output.append(EvaluationPolicyAlignment(alignment_id=stable_id("evaluation-policy",experiment.paper_experiment_id),paper_experiment_id=experiment.paper_experiment_id,repository_policy_ids=tuple(item.policy_id for item in repository_records),paper_policy=paper_policy,code_policy=code_policy,resolved_policy=resolved,status=status,reasoning=reason,confidence=1 if status is EvaluationPolicyAlignmentStatus.ALIGNED else .9 if status in {EvaluationPolicyAlignmentStatus.PAPER_ONLY,EvaluationPolicyAlignmentStatus.CODE_FALLBACK,EvaluationPolicyAlignmentStatus.CONFLICT} else .6 if status is EvaluationPolicyAlignmentStatus.SCIENTIFIC_DEFAULT else .4 if status is EvaluationPolicyAlignmentStatus.AMBIGUOUS else 0,paper_evidence=self._policy_evidence(paper_policy),repository_evidence=repository_evidence,conflict_id=conflict_id,adaptation_supported=adaptation_supported,warnings=alignment_warnings))
+        return tuple(output),tuple(conflicts)
+    def _scientific_default(self,paper_record,paper_policy,paper):
+        claims=tuple((*paper_record.claims,*(item for item in paper.paper_claims if item.target_id==paper_record.experiment_id)))
+        if paper_policy is not None and paper_policy.reporting_split and paper_policy.reporting_metrics:
+            reporting_split=paper_policy.reporting_split;reporting_metrics=paper_policy.reporting_metrics
+            run_count=paper_policy.run_count;seeds=paper_policy.seeds;aggregation=paper_policy.aggregation
+            evidence=paper_policy.evidence
+        else:
+            splits={item.split for item in claims if item.split is not None}
+            if len(splits)!=1 or any(item.split is None for item in claims) or not claims:return None
+            reporting_split=next(iter(splits));reporting_metrics=tuple(dict.fromkeys(item.metric_name for item in claims))
+            run_count=1;seeds=();aggregation=ResultAggregation.NONE
+            evidence=tuple(item.model_dump(mode="json") for claim in claims for item in claim.evidence)
+        if not reporting_metrics:return None
+        return EvaluationPolicy(checkpoint_policy=CheckpointPolicy.FINAL_EPOCH,reporting_split=reporting_split,reporting_metrics=reporting_metrics,run_count=run_count,seeds=seeds,aggregation=aggregation,source=EvaluationPolicySource.SCIENTIFIC_DEFAULT,evidence=evidence,confidence=EvaluationPolicyConfidence.INFERRED,warnings=("INFERRED_EVALUATION_POLICY",))
+    @staticmethod
+    def _policy_signature(policy):
+        return policy.model_dump_json(exclude={"source","evidence","confidence","warnings"})
+    @staticmethod
+    def _policy_evidence(policy):
+        if policy is None:return ()
+        values=[]
+        for item in policy.evidence:
+            try:values.append(item if isinstance(item,EvidenceReference) else EvidenceReference.model_validate(item))
+            except Exception:continue
+        return tuple(values)
     def _experiments(self,paper,repository,candidates,datasets,models,parameters,ablations,metrics):
         output=[];conflicts=[]
         for experiment in paper.experiments:

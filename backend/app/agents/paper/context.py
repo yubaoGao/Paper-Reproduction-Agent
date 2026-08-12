@@ -7,7 +7,7 @@ from .prompt_registry import PromptRegistry
 from .schemas import ContextClassificationResult, ContextItem, ExtractionContext
 
 _KEYWORDS=(
-    "experiment","experimental","evaluation","result","implementation","training","dataset","baseline","ablation",
+    "experiment","experimental","evaluation","result","implementation","training","dataset","baseline","ablation","checkpoint","early stopping","best epoch","seed","mean","standard deviation",
     "robust","sensitivity","efficiency","accuracy","precision","recall","f1","auc","性能","实验","结果","训练",
     "数据集","消融","鲁棒","敏感性","效率","评估","实现细节",
 )

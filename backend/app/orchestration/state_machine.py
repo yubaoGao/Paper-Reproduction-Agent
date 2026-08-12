@@ -97,10 +97,12 @@ class RunStateMachine:
         if steps == run.steps:
             raise KeyError(f"unknown reproduction step {replacement.step_id!r}")
         artifacts = tuple(item for step in steps for item in step.artifacts)
+        final_results = tuple(step.final_result for step in steps if step.final_result is not None)
         return _copy(
             run,
             steps=steps,
             artifacts=artifacts,
+            final_results=final_results,
             revision=run.revision + 1,
         )
 

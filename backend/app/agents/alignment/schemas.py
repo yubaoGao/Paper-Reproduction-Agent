@@ -9,7 +9,7 @@ class CandidateClassification(BaseModel):decisions:tuple[CandidateDecision,...]
 class AlignmentContextItem(BaseModel):locator:str;kind:str;text:str;score:int=0
 class AlignmentContext(BaseModel):items:tuple[AlignmentContextItem,...];selected_contexts:tuple[str,...];llm_metadata:tuple[LLMCallMetadata,...]=()
 class AlignmentStageExtraction(BaseModel):
-    experiment_alignments:tuple[ExperimentAlignmentRecord,...]=();dataset_mappings:tuple[DatasetAlignment,...]=();model_mappings:tuple[ModelAlignment,...]=();parameter_mappings:tuple[ParameterAlignment,...]=();ablation_mappings:tuple[AblationAlignment,...]=();metric_mappings:tuple[MetricAlignment,...]=();conflicts:tuple[AlignmentConflict,...]=();warnings:tuple[str,...]=();missing_components:tuple[str,...]=()
+    experiment_alignments:tuple[ExperimentAlignmentRecord,...]=();dataset_mappings:tuple[DatasetAlignment,...]=();model_mappings:tuple[ModelAlignment,...]=();parameter_mappings:tuple[ParameterAlignment,...]=();ablation_mappings:tuple[AblationAlignment,...]=();metric_mappings:tuple[MetricAlignment,...]=();evaluation_policy_alignments:tuple[EvaluationPolicyAlignment,...]=();conflicts:tuple[AlignmentConflict,...]=();warnings:tuple[str,...]=();missing_components:tuple[str,...]=()
 class AlignmentCatalogReview(BaseModel):valid:bool;missing_components:tuple[str,...]=();warnings:tuple[str,...]=()
 class AlignmentResult(BaseModel):
     model_config=ConfigDict(extra="forbid",frozen=True)

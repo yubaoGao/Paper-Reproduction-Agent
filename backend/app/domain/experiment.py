@@ -48,6 +48,141 @@ class ExperimentTaskType(str, Enum):
     CUSTOM = "custom"
 
 
+class CheckpointPolicy(str, Enum):
+    BEST_METRIC = "best_metric"
+    FINAL_EPOCH = "final_epoch"
+    EARLY_STOPPED = "early_stopped"
+    FIXED = "fixed"
+    UNKNOWN = "unknown"
+
+
+class MetricDirection(str, Enum):
+    MAXIMIZE = "maximize"
+    MINIMIZE = "minimize"
+
+
+class ResultAggregation(str, Enum):
+    NONE = "none"
+    MEAN = "mean"
+    MEAN_STD = "mean_std"
+
+
+class EvaluationPolicySource(str, Enum):
+    PAPER_EXPLICIT = "paper_explicit"
+    CODE_EXPLICIT = "code_explicit"
+    SCIENTIFIC_DEFAULT = "scientific_default"
+    USER_OVERRIDE = "user_override"
+
+
+class EvaluationPolicyConfidence(str, Enum):
+    EXPLICIT = "explicit"
+    INFERRED = "inferred"
+
+
+class EvaluationPolicy(DomainModel):
+    """How one selected paper experiment obtains its canonical final result."""
+
+    checkpoint_policy: CheckpointPolicy
+    selection_metric: NonEmptyStr | None = None
+    selection_split: NonEmptyStr | None = None
+    direction: MetricDirection | None = None
+    reporting_split: NonEmptyStr | None = None
+    reporting_metrics: tuple[NonEmptyStr, ...] = ()
+    run_count: int = Field(default=1, ge=1)
+    seeds: tuple[int, ...] = ()
+    aggregation: ResultAggregation = ResultAggregation.NONE
+    source: EvaluationPolicySource
+    fixed_checkpoint: NonEmptyStr | None = None
+    fixed_epoch: int | None = Field(default=None, ge=0)
+    evidence: tuple[JsonValue, ...] = ()
+    confidence: EvaluationPolicyConfidence | float | None = None
+    warnings: tuple[NonEmptyStr, ...] = ()
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def reject_boolean_confidence(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("confidence must be numeric")
+        if isinstance(value, (int, float)) and not 0 <= value <= 1:
+            raise ValueError("numeric confidence must be between zero and one")
+        return value
+
+    @model_validator(mode="after")
+    def valid_policy(self):
+        if len(set(self.reporting_metrics)) != len(self.reporting_metrics):
+            raise ValueError("reporting metrics must be unique")
+        if len(set(self.seeds)) != len(self.seeds):
+            raise ValueError("seeds must be unique")
+        if self.seeds and len(self.seeds) != self.run_count:
+            raise ValueError("explicit seeds must exactly cover run_count")
+        if self.run_count == 1 and self.aggregation is not ResultAggregation.NONE:
+            raise ValueError("single-run evaluation cannot aggregate")
+        if self.run_count > 1 and self.aggregation is ResultAggregation.NONE:
+            raise ValueError("multiple runs require mean or mean/std aggregation")
+        selection = (self.selection_metric, self.selection_split, self.direction)
+        if self.checkpoint_policy in {
+            CheckpointPolicy.BEST_METRIC,
+            CheckpointPolicy.EARLY_STOPPED,
+        } and any(value is None for value in selection):
+            raise ValueError("metric-based checkpoint policy requires metric, split and direction")
+        if self.checkpoint_policy is CheckpointPolicy.UNKNOWN and any(
+            value is not None for value in selection
+        ):
+            raise ValueError("unknown checkpoint policy cannot assert a selection rule")
+        if self.checkpoint_policy is CheckpointPolicy.FIXED and not (
+            self.fixed_checkpoint or self.fixed_epoch is not None
+        ):
+            raise ValueError("fixed checkpoint policy requires checkpoint or epoch")
+        if self.checkpoint_policy is not CheckpointPolicy.FIXED and (
+            self.fixed_checkpoint is not None or self.fixed_epoch is not None
+        ):
+            raise ValueError("fixed checkpoint fields require FIXED policy")
+        has_asserted_behavior = bool(
+            self.checkpoint_policy is not CheckpointPolicy.UNKNOWN
+            or any(value is not None for value in selection)
+            or self.reporting_split
+            or self.reporting_metrics
+            or self.run_count != 1
+            or self.seeds
+            or self.aggregation is not ResultAggregation.NONE
+            or self.fixed_checkpoint
+            or self.fixed_epoch is not None
+        )
+        if self.source in {
+            EvaluationPolicySource.PAPER_EXPLICIT,
+            EvaluationPolicySource.CODE_EXPLICIT,
+        } and has_asserted_behavior and not self.evidence:
+            raise ValueError("explicit evaluation policy requires evidence")
+        expected_source = {
+            EvaluationPolicySource.PAPER_EXPLICIT: "paper",
+            EvaluationPolicySource.CODE_EXPLICIT: "repository",
+        }.get(self.source)
+        if expected_source and self.evidence:
+            if any(
+                not isinstance(item, dict)
+                or item.get("source_type") != expected_source
+                or not any(item.get(key) for key in ("source_id", "locator", "text"))
+                for item in self.evidence
+            ):
+                raise ValueError("explicit evaluation policy evidence has the wrong source or shape")
+        if self.source is EvaluationPolicySource.SCIENTIFIC_DEFAULT and not self.warnings:
+            raise ValueError("scientific default must carry an explicit warning")
+        if self.source is EvaluationPolicySource.SCIENTIFIC_DEFAULT:
+            if self.confidence is not EvaluationPolicyConfidence.INFERRED:
+                raise ValueError("scientific default confidence must be INFERRED")
+            if "INFERRED_EVALUATION_POLICY" not in self.warnings:
+                raise ValueError("scientific default requires INFERRED_EVALUATION_POLICY warning")
+        return self
+
+    @property
+    def is_resolved(self) -> bool:
+        return bool(
+            self.checkpoint_policy is not CheckpointPolicy.UNKNOWN
+            and self.reporting_split
+            and self.reporting_metrics
+        )
+
+
 class RunStatus(str, Enum):
     """Lifecycle states owned by platform run orchestration."""
 
@@ -149,6 +284,69 @@ class ResourceRequirement(DomainModel):
     gpu_required:bool|None=None;gpu_count:int|None=Field(default=None,ge=0);cpu_cores:float|None=Field(default=None,gt=0);memory_mb:int|None=Field(default=None,ge=128);notes:tuple[NonEmptyStr,...]=()
 
 
+class ExperimentActionType(str, Enum):
+    TRAIN = "train"
+    EVALUATE = "evaluate"
+    AGGREGATE = "aggregate"
+
+
+class ExperimentAction(DomainModel):
+    action_id: NonEmptyStr
+    paper_experiment_id: NonEmptyStr
+    action_type: ExperimentActionType
+    depends_on_action_ids: tuple[NonEmptyStr, ...] = ()
+    command: ExecutableCommand | None = None
+    seed: int | None = None
+    produces_checkpoint: bool = False
+    produces_run_result: bool = False
+    produces_final_result: bool = False
+
+    @model_validator(mode="after")
+    def valid_action(self):
+        if self.action_id in self.depends_on_action_ids:
+            raise ValueError("action cannot depend on itself")
+        if len(set(self.depends_on_action_ids)) != len(self.depends_on_action_ids):
+            raise ValueError("action dependencies must be unique")
+        if self.action_type in {ExperimentActionType.TRAIN, ExperimentActionType.EVALUATE}:
+            if self.command is None:
+                raise ValueError("train and evaluate actions require a structured command")
+        if self.action_type is ExperimentActionType.AGGREGATE:
+            if self.command is not None or self.seed is not None:
+                raise ValueError("aggregate action is deterministic and has no command or seed")
+            if not self.produces_final_result:
+                raise ValueError("aggregate action must produce FinalResult")
+        return self
+
+
+class ExperimentActionPlan(DomainModel):
+    paper_experiment_id: NonEmptyStr
+    actions: tuple[ExperimentAction, ...] = Field(min_length=1)
+    execution_order: tuple[NonEmptyStr, ...] = Field(min_length=1)
+    final_action_id: NonEmptyStr
+
+    @model_validator(mode="after")
+    def valid_dag(self):
+        ids = [item.action_id for item in self.actions]
+        if len(ids) != len(set(ids)):
+            raise ValueError("action IDs must be unique")
+        if set(ids) != set(self.execution_order) or len(ids) != len(self.execution_order):
+            raise ValueError("action execution order must cover every action exactly")
+        if self.final_action_id not in ids:
+            raise ValueError("final action is absent from action plan")
+        positions = {value: index for index, value in enumerate(self.execution_order)}
+        for action in self.actions:
+            if action.paper_experiment_id != self.paper_experiment_id:
+                raise ValueError("action changes the selected paper experiment")
+            if not set(action.depends_on_action_ids) <= set(ids):
+                raise ValueError("action dependency references an unknown action")
+            if any(positions[parent] >= positions[action.action_id] for parent in action.depends_on_action_ids):
+                raise ValueError("action execution order violates dependencies")
+        final = next(item for item in self.actions if item.action_id == self.final_action_id)
+        if not final.produces_final_result:
+            raise ValueError("final action must produce FinalResult")
+        return self
+
+
 class ExperimentSpecification(DomainModel):
     """Reusable definition of what experiment should be executed."""
 
@@ -168,6 +366,8 @@ class ExperimentSpecification(DomainModel):
     hyperparameters: dict[NonEmptyStr, JsonValue] = Field(default_factory=dict)
     expected_metrics: tuple[MetricExpectation, ...] = ()
     expected_claim_ids: tuple[NonEmptyStr,...] = ()
+    evaluation_policy: EvaluationPolicy | None = None
+    action_plan: ExperimentActionPlan | None = None
     provenance_decision_ids: tuple[NonEmptyStr,...] = ()
     seed: int | None = None
     tags: tuple[NonEmptyStr, ...] = ()
@@ -181,6 +381,12 @@ class ExperimentSpecification(DomainModel):
             raise ValueError("tags must be unique")
         if len(set(self.expected_claim_ids))!=len(self.expected_claim_ids):raise ValueError("expected claim ids must be unique")
         if len(set(self.provenance_decision_ids))!=len(self.provenance_decision_ids):raise ValueError("provenance decision ids must be unique")
+        if self.action_plan is not None:
+            paper_id = self.metadata.get("paper_experiment_id")
+            if paper_id is not None and self.action_plan.paper_experiment_id != paper_id:
+                raise ValueError("action plan changes the selected paper experiment")
+            if self.evaluation_policy is None or not self.evaluation_policy.is_resolved:
+                raise ValueError("action plan requires a resolved evaluation policy")
         return self
 
 
@@ -299,6 +505,143 @@ class Artifact(DomainModel):
     size_bytes: int | None = Field(default=None, ge=0)
     checksum: NonEmptyStr | None = None
     metadata: dict[NonEmptyStr, JsonValue] = Field(default_factory=dict)
+
+
+class FinalMetric(DomainModel):
+    name: NonEmptyStr
+    value: float = Field(allow_inf_nan=False)
+    split: NonEmptyStr
+    unit: NonEmptyStr | None = None
+    checkpoint_reference: NonEmptyStr | None = None
+    epoch: int | None = Field(default=None, ge=0)
+    std: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    evidence: tuple[JsonValue, ...] = ()
+    provenance: dict[NonEmptyStr, JsonValue] = Field(default_factory=dict)
+
+    @field_validator("value", "std", mode="before")
+    @classmethod
+    def reject_boolean_numbers(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("boolean values are not valid final metrics")
+        return value
+
+
+class RunFinalResult(DomainModel):
+    result_id: NonEmptyStr
+    run_id: NonEmptyStr
+    seed: int | None = None
+    selected_checkpoint: NonEmptyStr | None = None
+    selected_epoch: int | None = Field(default=None, ge=0)
+    selection_metric: NonEmptyStr | None = None
+    selection_split: NonEmptyStr | None = None
+    selection_value: float | None = Field(default=None, allow_inf_nan=False)
+    reporting_metrics: tuple[FinalMetric, ...] = Field(min_length=1)
+    artifact_references: tuple[NonEmptyStr, ...] = ()
+    evidence: tuple[JsonValue, ...] = ()
+    provenance: dict[NonEmptyStr, JsonValue] = Field(default_factory=dict)
+
+    @field_validator("selection_value", mode="before")
+    @classmethod
+    def reject_boolean_selection_value(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("boolean selection value is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def one_checkpoint(self):
+        names = [item.name for item in self.reporting_metrics]
+        if len(names) != len(set(names)):
+            raise ValueError("run final metrics must be unique")
+        if len(self.artifact_references) != len(set(self.artifact_references)):
+            raise ValueError("run artifact references must be unique")
+        if len({item.checkpoint_reference for item in self.reporting_metrics}) != 1:
+            raise ValueError("run final metrics cannot be combined across checkpoints")
+        if len({item.epoch for item in self.reporting_metrics}) != 1:
+            raise ValueError("run final metrics cannot be combined across epochs")
+        if self.selected_checkpoint is not None and any(
+            item.checkpoint_reference != self.selected_checkpoint
+            for item in self.reporting_metrics
+        ):
+            raise ValueError("all final metrics must come from the selected checkpoint")
+        if self.selected_epoch is not None and any(
+            item.epoch != self.selected_epoch for item in self.reporting_metrics
+        ):
+            raise ValueError("all final metrics must come from the selected epoch")
+        return self
+
+
+class FinalResult(DomainModel):
+    result_id: NonEmptyStr
+    paper_experiment_id: NonEmptyStr
+    evaluation_policy: EvaluationPolicy
+    runs: tuple[RunFinalResult, ...] = Field(min_length=1)
+    reporting_metrics: tuple[FinalMetric, ...] = Field(min_length=1)
+    aggregation: ResultAggregation
+    evidence: tuple[JsonValue, ...] = ()
+    provenance: dict[NonEmptyStr, JsonValue] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def canonical_result_matches_policy(self):
+        policy = self.evaluation_policy
+        if not policy.is_resolved:
+            raise ValueError("FinalResult requires a resolved EvaluationPolicy")
+        if self.aggregation is not policy.aggregation:
+            raise ValueError("FinalResult aggregation differs from EvaluationPolicy")
+        if len(self.runs) != policy.run_count:
+            raise ValueError("FinalResult must include every configured run; best-seed selection is forbidden")
+        if len({item.result_id for item in self.runs}) != len(self.runs):
+            raise ValueError("FinalResult run result ids must be unique")
+        if len({item.run_id for item in self.runs}) != len(self.runs):
+            raise ValueError("FinalResult run ids must be unique")
+        seeds = [item.seed for item in self.runs]
+        if policy.seeds and tuple(seeds) != policy.seeds:
+            raise ValueError("FinalResult seeds differ from EvaluationPolicy")
+        if len([seed for seed in seeds if seed is not None]) != len(set(seed for seed in seeds if seed is not None)):
+            raise ValueError("FinalResult contains duplicate seeds")
+        expected_names = tuple(policy.reporting_metrics)
+        for run in self.runs:
+            if not (run.artifact_references or run.evidence or run.provenance):
+                raise ValueError("per-run FinalResult requires artifact evidence or provenance")
+            if tuple(item.name for item in run.reporting_metrics) != expected_names:
+                raise ValueError("per-run reporting metrics differ from EvaluationPolicy")
+            if any(item.split != policy.reporting_split for item in run.reporting_metrics):
+                raise ValueError("per-run reporting split differs from EvaluationPolicy")
+            if any(not (item.evidence or item.provenance) for item in run.reporting_metrics):
+                raise ValueError("final reporting metrics require evidence or provenance")
+            if policy.checkpoint_policy in {CheckpointPolicy.BEST_METRIC, CheckpointPolicy.EARLY_STOPPED}:
+                if (run.selection_metric, run.selection_split) != (
+                    policy.selection_metric,
+                    policy.selection_split,
+                ) or run.selection_value is None:
+                    raise ValueError("run checkpoint selection lacks policy provenance")
+                if run.selected_checkpoint is None and run.selected_epoch is None:
+                    raise ValueError("metric-selected run requires checkpoint or epoch provenance")
+            if policy.checkpoint_policy is CheckpointPolicy.FINAL_EPOCH and run.selected_epoch is None:
+                raise ValueError("final-epoch policy requires selected epoch provenance")
+            if policy.checkpoint_policy is CheckpointPolicy.FIXED:
+                if policy.fixed_checkpoint is not None and run.selected_checkpoint != policy.fixed_checkpoint:
+                    raise ValueError("run does not use the fixed checkpoint")
+                if policy.fixed_epoch is not None and run.selected_epoch != policy.fixed_epoch:
+                    raise ValueError("run does not use the fixed epoch")
+        if tuple(item.name for item in self.reporting_metrics) != expected_names:
+            raise ValueError("canonical reporting metrics differ from EvaluationPolicy")
+        if any(item.split != policy.reporting_split for item in self.reporting_metrics):
+            raise ValueError("canonical reporting split differs from EvaluationPolicy")
+        if self.aggregation is ResultAggregation.NONE:
+            if len(self.runs) != 1:
+                raise ValueError("non-aggregated FinalResult requires one run")
+            observed = self.runs[0].reporting_metrics
+            if any(left.value != right.value for left, right in zip(self.reporting_metrics, observed)):
+                raise ValueError("single-run canonical metrics must equal its run metrics")
+        if self.aggregation is ResultAggregation.MEAN_STD and any(
+            item.std is None for item in self.reporting_metrics
+        ):
+            raise ValueError("mean/std aggregation requires std for every metric")
+        if self.aggregation is ResultAggregation.MEAN and any(
+            item.std is not None for item in self.reporting_metrics
+        ):
+            raise ValueError("mean-only aggregation cannot report std")
+        return self
 
 
 class RunStartedPayload(DomainModel):

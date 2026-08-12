@@ -47,6 +47,8 @@ Step 使用 `PENDING → READY → PREPARING → RUNNING → VALIDATING` 主链�
 
 确定性验证固定先执行：command status/exit code、声明的 required artifact、artifact metadata schema。任一确定性检查失败时 semantic validator 不会被调用。只有确定性检查全部通过后才进入 `SemanticValidationPort`。
 
+带 `ExperimentActionPlan` 的计划在 admission 时展开到同一 Task 11 DAG。需要结果的 TRAIN/EVALUATE step 必须经 `ResultResolver` 得到 run-level canonical result；AGGREGATE step 确定性合并全部 seed。`exit_code == 0` 但缺少 `FinalResult` 会以 validation failure 结束，run manifest 也禁止缺少 required FinalResult 的 run 标记成功。
+
 `FailureClassifier` 输出 environment、dependency、code、config、data、resource、timeout、validation 或 unknown。`RetryPolicy` 同时限制最大 attempt 数和允许重试/补丁的 category。Timeout、data 与 resource 默认不重试；code/config/dependency/validation 只能通过 `CodingAgentPort` 请求修补。在 production composition 中该 port 必须绑定 Task 10 `OpenHandsCodingAgentAdapter`，因此补丁只能落在当前 run-private workspace，并继续受 locked constraint 与 Task 10 filesystem policy 约束。
 
 ## Curie 复用与拒绝

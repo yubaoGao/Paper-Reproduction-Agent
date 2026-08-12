@@ -5,7 +5,7 @@ from backend.app.llm import LLMRole
 from .schemas import FileClassification,RepositoryAnalysisContext,RepositoryContextItem
 
 class RepositoryContextBuilder:
-    KEYWORDS=("train","eval","dataset","model","loss","metric","config","checkpoint","ablation","experiment","readme","requirements","environment")
+    KEYWORDS=("train","eval","test","dataset","model","loss","metric","config","checkpoint","best","early_stop","seed","aggregate","result","ablation","experiment","readme","requirements","environment")
     def __init__(self,router,prompts,*,max_files=48,max_chars_per_file=6000,classify_threshold=80): self.router=router;self.prompts=prompts;self.max_files=max_files;self.max_chars_per_file=max_chars_per_file;self.classify_threshold=classify_threshold
     def build(self,snapshot,static,paper_catalog=None,reproduction_specification=None):
         scores={f.path:self._score(f.path,f.file_type.value) for f in snapshot.files if f.analysis_eligible and f.is_text}

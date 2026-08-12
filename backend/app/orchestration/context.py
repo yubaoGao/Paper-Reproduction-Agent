@@ -14,9 +14,9 @@ from backend.app.runtime.state import run_namespace, run_thread_id
 
 
 class PlanStepContextFactory:
-    def create(self, plan: ReproductionExecutionPlan, step_id: str, runtime_run_id: str):
+    def create(self, plan: ReproductionExecutionPlan, step_id: str, runtime_run_id: str, *, action=None):
         experiment = next(item for item in plan.experiments if item.id == step_id)
-        command = experiment.resolved_command
+        command = action.command if action is not None else experiment.resolved_command
         if command is None:
             command = ExecutableCommand(
                 program=experiment.command[0],
@@ -48,6 +48,11 @@ class PlanStepContextFactory:
             self._constraint("config_ids", list(command.config_ids)),
             self._constraint("command", command.model_dump(mode="json")),
             self._constraint("expected_claim_ids", list(experiment.expected_claim_ids)),
+            self._constraint("evaluation_policy",None if experiment.evaluation_policy is None else experiment.evaluation_policy.model_dump(mode="json")),
+            self._constraint("action_plan",None if experiment.action_plan is None else experiment.action_plan.model_dump(mode="json")),
+            self._constraint("action_id",None if action is None else action.action_id),
+            self._constraint("action_type",None if action is None else action.action_type.value),
+            self._constraint("seed",None if action is None else action.seed),
             *(self._constraint(f"hyperparameter:{key}", value) for key, value in experiment.hyperparameters.items()),
             self._constraint("ablation_modifications", ablations),
         )

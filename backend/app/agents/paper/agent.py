@@ -4,7 +4,7 @@ import json
 from datetime import datetime,timezone
 from pathlib import Path
 from pydantic import BaseModel,ConfigDict,Field
-from backend.app.domain import ExtractionStatus, ExtractionTrace, FigureObservation, PaperDocument
+from backend.app.domain import EvidenceReference, EvaluationPolicySource, ExtractionStatus, ExtractionTrace, FigureObservation, PaperDocument
 from backend.app.llm import LLMCallMetadata, LLMRole, LLMRouter, StructuredOutputError
 from .catalog import CatalogMerger,CatalogValidator,CatalogValidationError,PaperExtractionError
 from .context import ContextBuilder,DeterministicTableExtractor
@@ -84,6 +84,12 @@ class PaperExperimentExtractionAgent:
         return None,calls,repairs,f"{name} retry exhaustion: {issue}"
     def _validate_stage(self,stage,document):
         evidence=list(stage.evidence)
+        policies=tuple(value for value in (stage.evaluation_policy,*(record.evaluation_policy for record in stage.experiments)) if value is not None)
+        for policy in policies:
+            if policy.source is not EvaluationPolicySource.PAPER_EXPLICIT:raise ValueError("paper extraction may only emit PAPER_EXPLICIT evaluation policy")
+            for value in policy.evidence:
+                try:evidence.append(EvidenceReference.model_validate(value))
+                except Exception as exc:raise ValueError("invalid paper evaluation policy evidence") from exc
         for entity in (*stage.datasets,*stage.model_variants): evidence.extend(entity.evidence)
         for parameter in (*stage.training_parameters,*stage.evaluation_parameters): evidence.extend(parameter.evidence)
         for record in stage.experiments:

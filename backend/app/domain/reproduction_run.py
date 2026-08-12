@@ -10,6 +10,8 @@ from pydantic import Field, JsonValue, field_validator, model_validator
 from .experiment import (
     Artifact,
     DomainModel,
+    FinalResult,
+    ExperimentActionType,
     Metric,
     NonEmptyStr,
     RunStatus,
@@ -140,6 +142,7 @@ class AttemptRecord(DomainModel):
     patches: tuple[PatchRecord, ...] = ()
     artifacts: tuple[ArtifactReference, ...] = ()
     metrics: tuple[Metric, ...] = ()
+    final_result: FinalResult | None = None
 
     @field_validator("started_at", "finished_at")
     @classmethod
@@ -164,6 +167,8 @@ class AttemptRecord(DomainModel):
 class StepRun(DomainModel):
     step_id: NonEmptyStr
     experiment_id: NonEmptyStr
+    action_type: ExperimentActionType | None = None
+    seed: int | None = None
     depends_on_step_ids: tuple[NonEmptyStr, ...] = ()
     priority: int = 0
     control_first: bool = False
@@ -174,6 +179,7 @@ class StepRun(DomainModel):
     failure: FailureRecord | None = None
     analysis: JsonValue | None = None
     conclusion: NonEmptyStr | None = None
+    final_result: FinalResult | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
 
@@ -211,6 +217,7 @@ class RunManifest(DomainModel):
     resolved_commit_sha: NonEmptyStr
     ordered_step_ids: tuple[NonEmptyStr, ...]
     dependencies: dict[NonEmptyStr, tuple[NonEmptyStr, ...]]
+    required_final_result_step_ids: tuple[NonEmptyStr, ...] = ()
     plan_digest: NonEmptyStr
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -226,6 +233,10 @@ class RunManifest(DomainModel):
             raise ValueError("manifest step IDs must be unique")
         if set(self.dependencies) != step_ids:
             raise ValueError("manifest dependencies must cover every step")
+        if len(self.required_final_result_step_ids)!=len(set(self.required_final_result_step_ids)):
+            raise ValueError("manifest final-result step IDs must be unique")
+        if not set(self.required_final_result_step_ids) <= step_ids:
+            raise ValueError("manifest final-result requirement references unknown step")
         positions = {value: index for index, value in enumerate(self.ordered_step_ids)}
         for step_id, parents in self.dependencies.items():
             if not set(parents) <= step_ids:
@@ -242,6 +253,7 @@ class ReproductionRun(DomainModel):
     manifest: RunManifest
     steps: tuple[StepRun, ...]
     artifacts: tuple[ArtifactReference, ...] = ()
+    final_results: tuple[FinalResult, ...] = ()
     failure: FailureRecord | None = None
     created_at: datetime = Field(default_factory=utc_now)
     started_at: datetime | None = None
@@ -261,16 +273,23 @@ class ReproductionRun(DomainModel):
         if tuple(step_ids) != self.manifest.ordered_step_ids:
             raise ValueError("run steps must exactly follow the authoritative manifest")
         for step in self.steps:
-            if step.experiment_id != step.step_id:
-                raise ValueError("step and experiment IDs must match the execution plan")
+            if step.action_type is None and step.experiment_id != step.step_id:
+                raise ValueError("legacy step and experiment IDs must match the execution plan")
             if step.depends_on_step_ids != self.manifest.dependencies[step.step_id]:
                 raise ValueError("step dependencies differ from the authoritative manifest")
             if any(item.step_id != step.step_id for item in step.artifacts):
                 raise ValueError("step artifact reference has the wrong owner")
+        expected_results=tuple(step.final_result for step in self.steps if step.final_result is not None)
+        if self.final_results!=expected_results:
+            raise ValueError("run final-result index differs from step records")
         if self.status is RunStatus.SUCCEEDED and not all(
             item.status is StepStatus.SUCCEEDED for item in self.steps
         ):
             raise ValueError("successful run requires every step to succeed")
+        if self.status is RunStatus.SUCCEEDED:
+            required=set(self.manifest.required_final_result_step_ids)
+            obtained={item.step_id for item in self.steps if item.final_result is not None}
+            if not required<=obtained:raise ValueError("successful run is missing canonical FinalResult")
         if self.status is RunStatus.FAILED and self.failure is None:
             raise ValueError("failed reproduction run requires a failure")
         if self.status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}:

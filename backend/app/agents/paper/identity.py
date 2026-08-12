@@ -8,7 +8,15 @@ import re
 import unicodedata
 from collections import OrderedDict
 
-from backend.app.domain import CatalogEntity, PaperClaim, PaperExperimentRecord, PaperReference
+from backend.app.domain import (
+    CatalogEntity,
+    CheckpointPolicy,
+    EvaluationPolicy,
+    EvaluationPolicySource,
+    PaperClaim,
+    PaperExperimentRecord,
+    PaperReference,
+)
 
 
 class StableExperimentIdentityError(ValueError):
@@ -183,11 +191,32 @@ class StableExperimentIdentityGenerator:
         claims = _unique(item for value in values for item in value.claims)
         evidence = _unique(item for value in values for item in value.evidence)
         parameters = _unique_parameters(item for value in values for item in value.parameters)
+        policies = tuple(value.evaluation_policy for value in values if value.evaluation_policy is not None)
+        signatures = {
+            value.model_dump_json(exclude={"evidence", "warnings", "confidence"})
+            for value in policies
+        }
+        policy_evidence = _unique(item for value in policies for item in value.evidence)
+        policy_warnings = _strings(item for value in policies for item in value.warnings)
+        if len(signatures) == 1:
+            policy = policies[0].model_copy(
+                update={"evidence": policy_evidence, "warnings": policy_warnings}
+            )
+        elif signatures:
+            policy = EvaluationPolicy(
+                checkpoint_policy=CheckpointPolicy.UNKNOWN,
+                source=EvaluationPolicySource.PAPER_EXPLICIT,
+                evidence=policy_evidence,
+                warnings=(*policy_warnings, "Conflicting duplicate evaluation policies require resolution."),
+            )
+        else:
+            policy = None
         return base.model_copy(
             update={
                 "claims": claims,
                 "evidence": evidence,
                 "parameters": parameters,
+                "evaluation_policy": policy,
                 "source_sections": _strings(value for item in values for value in item.source_sections),
                 "source_tables": _strings(value for item in values for value in item.source_tables),
                 "source_figures": _strings(value for item in values for value in item.source_figures),

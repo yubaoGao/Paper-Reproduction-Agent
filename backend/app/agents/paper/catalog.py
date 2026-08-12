@@ -3,7 +3,8 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from backend.app.domain import (
-    CatalogEntity, ConflictCandidate, ConflictType, EvidenceReference,
+    CatalogEntity, CheckpointPolicy, ConflictCandidate, ConflictType, EvidenceReference,
+    EvaluationPolicy, EvaluationPolicySource,
     ExperimentType, ExtractionConflict, ExtractionMetadata, ExtractionStatus,
     PaperClaim, PaperDocument, PaperExperimentCatalog, PaperExperimentRecord,
     ReproductionParameter,
@@ -34,6 +35,7 @@ class CatalogMerger:
         experiments,references=self.identity_generator.assign(document.paper,raw_experiments,datasets=datasets,models=models)
         training=self._parameters([x for stage in stages for x in stage.training_parameters])
         evaluation=self._parameters([x for stage in stages for x in stage.evaluation_parameters])
+        evaluation_policy=self._policy([x.evaluation_policy for x in stages if x.evaluation_policy is not None])
         stage_claims=self.identity_generator.remap_claims([x for stage in stages for x in stage.claims],references)
         claims,conflicts=self._claims(stage_claims,experiments)
         evidence=_unique([x for stage in stages for x in stage.evidence])
@@ -44,7 +46,7 @@ class CatalogMerger:
         return PaperExperimentCatalog(
             catalog_id=f"catalog:{document.document_id}",document_id=document.document_id,paper=document.paper,
             datasets=datasets,model_variants=models,experiments=experiments,
-            training_parameters=training,evaluation_parameters=evaluation,paper_claims=claims,
+            training_parameters=training,evaluation_parameters=evaluation,evaluation_policy=evaluation_policy,paper_claims=claims,
             evidence=evidence,conflicts=conflicts,figure_observations=tuple(figure_observations),extraction_status=status,
             extraction_metadata=ExtractionMetadata(stages_completed=tuple(str(i+1) for i in range(len(stages))),missing_components=all_missing,warnings=tuple(dict.fromkeys((*warnings,*stage_warnings)))),
         )
@@ -70,6 +72,19 @@ class CatalogMerger:
             elif result[key].value==item.value and result[key].status==item.status:
                 result[key]=result[key].model_copy(update={"evidence":_unique((*result[key].evidence,*item.evidence))})
         return tuple(result.values())
+    def _policy(self,items):
+        if not items:return None
+        signatures={item.model_dump_json(exclude={"evidence","warnings","confidence"}) for item in items}
+        evidence=_unique([value for item in items for value in item.evidence])
+        warnings=tuple(dict.fromkeys(value for item in items for value in item.warnings))
+        if len(signatures)==1:
+            return items[0].model_copy(update={"evidence":evidence,"warnings":warnings})
+        return EvaluationPolicy(
+            checkpoint_policy=CheckpointPolicy.UNKNOWN,
+            source=EvaluationPolicySource.PAPER_EXPLICIT,
+            evidence=evidence,
+            warnings=(*warnings,"Conflicting paper evaluation policies require resolution."),
+        )
     def _claims(self,items,experiments):
         # Include claims nested by stage experiment and normalize their target id.
         items=list(items)+[claim for record in experiments for claim in record.claims]
@@ -108,6 +123,7 @@ class CatalogValidator:
             if not entity.evidence: raise CatalogValidationError(f"entity {entity.canonical_name} has no evidence")
             evidence.extend(entity.evidence)
         for parameter in (*catalog.training_parameters,*catalog.evaluation_parameters): evidence.extend(parameter.evidence); self.evidence_validator.validate_parameter(parameter,document)
+        if catalog.evaluation_policy is not None:evidence.extend(self._policy_evidence(catalog.evaluation_policy))
         for record in catalog.experiments:
             if not record.evidence: raise CatalogValidationError(f"experiment {record.experiment_id} has no evidence")
             if record.dataset and _norm(record.dataset) not in dataset_names: raise CatalogValidationError(f"unknown dataset in experiment {record.experiment_id}")
@@ -120,6 +136,7 @@ class CatalogValidator:
                 if not any(x.figure_id==figure for x in document.figures): raise CatalogValidationError(f"unknown source figure: {figure}")
             all_claims.extend(record.claims); evidence.extend(record.evidence)
             for parameter in record.parameters: evidence.extend(parameter.evidence); self.evidence_validator.validate_parameter(parameter,document)
+            if record.evaluation_policy is not None:evidence.extend(self._policy_evidence(record.evaluation_policy))
         for claim in all_claims:
             if claim.target_id and claim.target_id not in experiments: raise CatalogValidationError(f"claim {claim.id} has dangling experiment reference")
             evidence.extend(claim.evidence)
@@ -139,3 +156,10 @@ class CatalogValidator:
             semantic_seen[key]=claim.value
         try: self.evidence_validator.validate_all(_unique(evidence),document)
         except EvidenceValidationError as exc: raise CatalogValidationError(str(exc)) from exc
+    @staticmethod
+    def _policy_evidence(policy):
+        values=[]
+        for item in policy.evidence:
+            try:values.append(item if isinstance(item,EvidenceReference) else EvidenceReference.model_validate(item))
+            except Exception as exc:raise CatalogValidationError("evaluation policy contains invalid paper evidence") from exc
+        return tuple(values)

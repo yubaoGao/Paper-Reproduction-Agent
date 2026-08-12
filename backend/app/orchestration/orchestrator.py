@@ -17,6 +17,8 @@ from backend.app.domain import (
     AttemptRecord,
     AttemptStatus,
     FailureCategory,
+    ExperimentActionType,
+    ResultAggregation,
     PatchStatus,
     ReproductionExecutionPlan,
     ReproductionRun,
@@ -25,6 +27,7 @@ from backend.app.domain import (
     ValidationPhase,
     ValidationRecord,
 )
+from backend.app.services.result_resolution import ResultResolutionRequest,aggregate_final_result
 from backend.app.runtime.curie_models import (
     CommandExecutionRequest,
     CommandExecutionResult,
@@ -67,6 +70,7 @@ class ReproductionOrchestrator:
         deterministic_validator=None,
         failure_classifier=None,
         context_factory=None,
+        result_resolver=None,
     ) -> None:
         self.repository = repository
         self.command_port = command_port
@@ -78,6 +82,7 @@ class ReproductionOrchestrator:
         self.validator = deterministic_validator or DeterministicValidator()
         self.classifier = failure_classifier or FailureClassifier()
         self.context_factory = context_factory or PlanStepContextFactory()
+        self.result_resolver = result_resolver
         self.state_machine = RunStateMachine()
         self.dispatcher = ExecutionDispatcher(self.state_machine)
         self.patch_coordinator = (
@@ -136,9 +141,13 @@ class ReproductionOrchestrator:
         return self._transition_run(run, RunStatus.FAILED, failure=failure)
 
     def _execute_step(self, run, plan, step_id):
-        experiment = next(item for item in plan.experiments if item.id == step_id)
+        step_record=self.state_machine.step(run,step_id)
+        experiment = next(item for item in plan.experiments if item.id == step_record.experiment_id)
+        action=self._action(experiment,step_id)
+        if action is not None and action.action_type is ExperimentActionType.AGGREGATE:
+            return self._execute_aggregate_step(run,experiment,action,step_id)
         runtime_run_id = f"{run.run_id}:step:{step_id}"
-        context = self.context_factory.create(plan, step_id, runtime_run_id)
+        context = self.context_factory.create(plan, experiment.id, runtime_run_id,action=action)
         run = self._transition_step(run, step_id, StepStatus.PREPARING)
         try:
             workspace = self.workspace_port.prepare(context)
@@ -263,6 +272,21 @@ class ReproductionOrchestrator:
                             type(exc).__name__,
                         ),
                     )
+                canonical_result = None
+                needs_result=action.produces_run_result if action is not None else bool(experiment.metadata.get("requires_final_result"))
+                resolution_policy=self._run_policy(experiment.evaluation_policy,action)
+                if all(item.passed for item in deterministic) and needs_result:
+                    canonical_result, final_result_validation = self._resolve_final_result(
+                        plan,
+                        run,
+                        experiment,
+                        result,
+                        artifacts,
+                        step_id,
+                        attempt_number,
+                        resolution_policy,
+                    )
+                    deterministic = (*deterministic, final_result_validation)
                 validations = deterministic
                 if all(item.passed for item in deterministic) and self.semantic_validation_port:
                     validations = (
@@ -305,6 +329,7 @@ class ReproductionOrchestrator:
                     validations=validations,
                     artifacts=artifacts,
                     metrics=result.metrics,
+                    final_result=canonical_result,
                 )
                 run = self._append_attempt(run, step_id, attempt)
                 final_result = result
@@ -318,6 +343,7 @@ class ReproductionOrchestrator:
                         artifacts=artifacts,
                         analysis=analysis,
                         conclusion=conclusion,
+                        final_result=canonical_result,
                     )
                 if not self.retry_policy.allows(failure, attempt_number):
                     break
@@ -409,6 +435,91 @@ class ReproductionOrchestrator:
             )
             for item in unique.values()
         )
+
+    def _resolve_final_result(self, plan, run, experiment, result, artifacts, step_id, attempt_number, policy):
+        failure = None
+        value = None
+        if self.result_resolver is None:
+            failure = "no ResultResolver is configured"
+        elif policy is None or not policy.is_resolved:
+            failure = "execution plan lacks a resolved EvaluationPolicy"
+        else:
+            try:
+                step=self.state_machine.step(run,step_id)
+                inherited=tuple(
+                    reference.artifact
+                    for parent_id in step.depends_on_step_ids
+                    for reference in self.state_machine.step(run,parent_id).artifacts
+                )
+                available_artifacts=tuple({(item.name,item.uri):item for item in (*inherited,*(reference.artifact for reference in artifacts))}.values())
+                value = self.result_resolver.resolve(
+                    ResultResolutionRequest(
+                        repository_id=plan.repository.repository_id,
+                        repository_snapshot_id=plan.repository_snapshot_id,
+                        paper_experiment_id=str(experiment.metadata.get("paper_experiment_id")),
+                        orchestration_run_id=run.run_id,
+                        evaluation_policy=policy,
+                        observed_metrics=result.metrics,
+                        artifacts=available_artifacts,
+                        stdout_reference=result.stdout_reference,
+                        stderr_reference=result.stderr_reference,
+                        provenance={"step_id":step_id,"attempt_number":str(attempt_number)},
+                    )
+                )
+                if value.paper_experiment_id != experiment.metadata.get("paper_experiment_id"):
+                    raise ValueError("ResultResolver changed the selected paper experiment")
+                if value.evaluation_policy != policy:
+                    raise ValueError("ResultResolver changed the locked EvaluationPolicy")
+            except Exception as exc:
+                value = None
+                failure = f"FinalResult resolution failed: {type(exc).__name__}"
+        digest = hashlib.sha256(
+            f"{step_id}:{attempt_number}:deterministic:final_result".encode()
+        ).hexdigest()[:20]
+        return value, ValidationRecord(
+            validation_id=f"validation:{digest}",
+            validator_name="canonical_final_result",
+            phase=ValidationPhase.DETERMINISTIC,
+            passed=value is not None,
+            status="passed" if value is not None else "missing",
+            violations=() if value is not None else (failure or "FinalResult is missing",),
+            details={} if value is None else {"final_result_id":value.result_id},
+        )
+
+    def _execute_aggregate_step(self,run,experiment,action,step_id):
+        run=self._transition_step(run,step_id,StepStatus.PREPARING)
+        run=self._transition_step(run,step_id,StepStatus.RUNNING)
+        run=self._transition_step(run,step_id,StepStatus.VALIDATING)
+        started=datetime.now(timezone.utc);value=None;violation=None
+        try:
+            parents=[self.state_machine.step(run,parent) for parent in action.depends_on_action_ids]
+            run_results=tuple(
+                parent.final_result.runs[0]
+                for parent in parents
+                if parent.final_result is not None and len(parent.final_result.runs)==1
+            )
+            if experiment.evaluation_policy is None:raise ValueError("aggregate action lacks EvaluationPolicy")
+            value=aggregate_final_result(action.paper_experiment_id,experiment.evaluation_policy,run_results,provenance={"orchestration_run_id":run.run_id,"step_id":step_id})
+        except Exception as exc:
+            violation=f"FinalResult aggregation failed: {type(exc).__name__}"
+        digest=hashlib.sha256(f"{step_id}:1:deterministic:aggregate".encode()).hexdigest()[:20]
+        validation=ValidationRecord(validation_id=f"validation:{digest}",validator_name="canonical_aggregation",phase=ValidationPhase.DETERMINISTIC,passed=value is not None,status="passed" if value is not None else "invalid",violations=() if value is not None else (violation or "aggregation failed",),details={} if value is None else {"final_result_id":value.result_id})
+        failure=None if value is not None else self.classifier.record(step_id,1,FailureCategory.VALIDATION,"FINAL_RESULT_AGGREGATION_FAILED","per-run final results could not be canonically aggregated",retryable=False,details={"violation":violation})
+        attempt=AttemptRecord(attempt_number=1,command_id=f"internal:aggregate:{step_id}",status=AttemptStatus.SUCCEEDED if value is not None else AttemptStatus.FAILED,started_at=started,finished_at=datetime.now(timezone.utc),exit_code=0 if value is not None else 1,failures=() if failure is None else (failure,),validations=(validation,),final_result=value)
+        run=self._append_attempt(run,step_id,attempt)
+        if failure is not None:return self._transition_step(run,step_id,StepStatus.FAILED,failure=failure)
+        return self._transition_step(run,step_id,StepStatus.SUCCEEDED,final_result=value,analysis={"aggregation":experiment.evaluation_policy.aggregation.value,"runs":len(value.runs)},conclusion="Canonical per-run results were aggregated without best-seed selection.")
+
+    @staticmethod
+    def _action(experiment,step_id):
+        if experiment.action_plan is None:return None
+        return next(item for item in experiment.action_plan.actions if item.action_id==step_id)
+
+    @staticmethod
+    def _run_policy(policy,action):
+        if policy is None or action is None or policy.run_count==1:return policy
+        seeds=(action.seed,) if action.seed is not None else ()
+        return policy.model_copy(update={"run_count":1,"seeds":seeds,"aggregation":ResultAggregation.NONE})
 
     @staticmethod
     def _artifact_collection_validation(step_id, attempt_number, exception_type):

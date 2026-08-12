@@ -21,6 +21,9 @@ class AlignmentContextBuilder:
         paper_records=[x.model_dump(mode="json") for x in paper.experiments if x.experiment_id in paper_ids]
         if stage=="dataset_model":paper_records.extend(x.model_dump(mode="json") for x in (*paper.datasets,*paper.model_variants) if x.canonical_name in paper_ids)
         repo_records=[x.model_dump(mode="json") for x in (*repository.experiment_implementations,*repository.datasets,*repository.models,*repository.ablation_mechanisms,*repository.metrics) if getattr(x,"implementation_id",getattr(x,"component_id","")) in repo_ids]
+        if stage=="evaluation_policy":
+            paper_records=[x.model_dump(mode="json") for x in paper.experiments]
+            repo_records=[x.model_dump(mode="json") for x in repository.evaluation_policies]
         draft=getattr(deterministic,self._draft_field(stage),())
         for locator,kind,value in ((f"stage:{stage}:paper","paper",paper_records),(f"stage:{stage}:repository","repository",repo_records),(f"stage:{stage}:deterministic","draft",[x.model_dump(mode="json") for x in draft])):
             text=json.dumps(value,ensure_ascii=False)
@@ -34,4 +37,4 @@ class AlignmentContextBuilder:
     @staticmethod
     def _category(stage,category):return category in {"dataset","model"} if stage=="dataset_model" else category==stage.rstrip("s") or stage in {"parameters","metrics","ablations"} and category==stage[:-1]
     @staticmethod
-    def _draft_field(stage):return {"dataset_model":"datasets","experiment":"experiments","association":"experiments","parameters":"parameters","ablations":"ablations","metrics":"metrics","conflicts":"conflicts"}[stage]
+    def _draft_field(stage):return {"dataset_model":"datasets","experiment":"experiments","association":"experiments","parameters":"parameters","ablations":"ablations","metrics":"metrics","evaluation_policy":"evaluation_policies","conflicts":"conflicts"}[stage]

@@ -12,10 +12,12 @@ class ReproductionPlanValidator:
         if repo.repository.repository_id!=alignment.repository.repository_id: raise PlanningValidationError("repository identity mismatch")
         if repo.snapshot_id!=alignment.repository_snapshot_id or repo.resolved_commit_sha!=alignment.resolved_commit_sha: raise PlanningValidationError("repository snapshot mismatch")
 
-    def validate(self,plan,paper,repo,alignment):
+    def validate(self,plan,paper,repo,alignment,*,specification=None):
+        production_ids=set(specification.selected_experiment_ids) if specification is not None else set()
+        if production_ids and tuple(plan.target_experiment_ids)!=tuple(specification.selected_experiment_ids):raise PlanningValidationError("execution plan changes the authoritative experiment selection")
         entrypoints={x.entrypoint_id for x in repo.entrypoints}; configs={x.config_id for x in repo.configurations}; commands={x.command_id for x in repo.commands}
         decisions={x.decision_id for x in plan.decisions}; claims={x.id for x in paper.paper_claims}|{c.id for x in paper.experiments for c in x.claims}
-        alignment_ids={x.alignment_id for group in (alignment.experiment_alignments,alignment.dataset_mappings,alignment.model_mappings,alignment.parameter_mappings,alignment.ablation_mappings,alignment.metric_mappings) for x in group}
+        alignment_ids={x.alignment_id for group in (alignment.experiment_alignments,alignment.dataset_mappings,alignment.model_mappings,alignment.parameter_mappings,alignment.ablation_mappings,alignment.metric_mappings,alignment.evaluation_policy_alignments) for x in group}
         conflict_ids={x.conflict_id for x in alignment.conflicts}; paper_experiments={x.experiment_id:x for x in paper.experiments}; decision_records={x.decision_id:x for x in plan.decisions}
         for decision in plan.decisions:
             if decision.alignment_reference and decision.alignment_reference not in alignment_ids: raise PlanningValidationError("dangling decision alignment reference")
@@ -37,11 +39,13 @@ class ReproductionPlanValidator:
             for key in exp.hyperparameters:
                 if f"parameter:{key}" not in semantic_keys and f"ablation:{key}" not in semantic_keys: raise PlanningValidationError("hyperparameter lacks a planning decision")
             if exp.task_type.value=="ablation" and not any(x.startswith("ablation:") for x in semantic_keys): raise PlanningValidationError("ablation implementation lacks provenance")
+            if exp.metadata.get("paper_experiment_id") in production_ids:
+                if exp.evaluation_policy is None or not exp.evaluation_policy.is_resolved or exp.action_plan is None:raise PlanningValidationError("selected production experiment lacks resolved final-result action plan")
         accounted={x.metadata.get("paper_experiment_id") for x in plan.experiments}|{x.paper_experiment_id for x in plan.blockers}|{x.paper_experiment_id for x in plan.unresolved_items}
         if not set(plan.target_experiment_ids)<=accounted: raise PlanningValidationError("not every target is accounted for")
         if plan.status is PlanStatus.READY and len(plan.experiments)!=len(plan.target_experiment_ids): raise PlanningValidationError("ready plan must specify every target")
         if plan.policy.value=="strict":
-            unresolved={x.conflict_id for x in alignment.conflicts if x.status.value=="unresolved"}
+            unresolved={x.conflict_id for x in alignment.conflicts if x.status.value=="unresolved" and x.conflict_type.value!="evaluation_policy_conflict"}
             relevant={x for record in alignment.experiment_alignments if record.paper_experiment_id in plan.target_experiment_ids for x in record.conflict_ids}
             blocked={x.conflict_id for x in plan.blockers if x.conflict_id}
             if unresolved&relevant-blocked: raise PlanningValidationError("strict plan silently ignores an unresolved conflict")

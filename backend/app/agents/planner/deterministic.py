@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from backend.app.domain import *
+from .actions import EvaluationActionPlanner
 
 def _norm(value):
     return re.sub(r"[^a-z0-9]+","",(value or "").casefold())
@@ -11,6 +12,7 @@ def _id(prefix,*parts):
     return f"{prefix}:"+hashlib.sha256("\x1f".join(str(x) for x in parts).encode()).hexdigest()[:16]
 
 class DeterministicPlanBuilder:
+    def __init__(self):self.action_planner=EvaluationActionPlanner()
     def build(self,spec,paper,repo,alignment,policy,overrides,semantic=None):
         semantic=semantic or {}; blockers=[]; unresolved=[]; decisions=[]; experiments=[]
         selected=self._targets(spec,paper,blockers)
@@ -19,12 +21,14 @@ class DeterministicPlanBuilder:
         datasets={x.component_id:x for x in repo.datasets}; components={x.component_id:x for x in repo.ablation_mechanisms}
         params={x.alignment_id:x for x in alignment.parameter_mappings}; dataset_maps={x.alignment_id:x for x in alignment.dataset_mappings}
         conflicts={x.conflict_id:x for x in alignment.conflicts}
+        evaluation_alignments={x.paper_experiment_id:x for x in alignment.evaluation_policy_alignments}
+        repository_evaluation_policies={x.policy_id:x for x in repo.evaluation_policies}
         user_params={x.name:x.value for x in spec.parameters if x.value is not None and any(e.source_type is EvidenceSourceType.USER for e in x.evidence)}|dict(overrides.parameters)
         for paper_exp in selected:
             record=alignments.get(paper_exp.experiment_id)
             if record is None:
                 blockers.append(self._block("missing_alignment",paper_exp.experiment_id,"No paper-code experiment alignment exists.")); continue
-            strict_conflicts=[conflicts[x] for x in record.conflict_ids if x in conflicts and conflicts[x].status is AlignmentConflictStatus.UNRESOLVED]
+            strict_conflicts=[conflicts[x] for x in record.conflict_ids if x in conflicts and conflicts[x].status is AlignmentConflictStatus.UNRESOLVED and conflicts[x].conflict_type is not AlignmentConflictType.EVALUATION_POLICY_CONFLICT]
             if policy is ReproductionPolicy.STRICT and strict_conflicts:
                 for conflict in strict_conflicts: blockers.append(self._block("unresolved_alignment_conflict",paper_exp.experiment_id,f"Strict policy cannot resolve alignment conflict {conflict.semantic_key!r}.",record.alignment_id,conflict.conflict_id))
                 continue
@@ -97,6 +101,34 @@ class DeterministicPlanBuilder:
             arguments=(ep.path,)+(() if command_ref is None else command_ref.arguments)
             program=ep.interpreter or ("python" if ep.path.casefold().endswith(".py") else ep.path)
             resolved=ExecutableCommand(program=program,arguments=arguments,entrypoint_id=ep.entrypoint_id,config_ids=selected_configs,command_reference_id=None if command_ref is None else command_ref.command_id,environment_variable_references=() if command_ref is None else command_ref.environment_variables)
+            evaluation_policy=overrides.evaluation_policies.get(paper_exp.experiment_id)
+            evaluation_alignment=evaluation_alignments.get(paper_exp.experiment_id)
+            if evaluation_alignment is not None and evaluation_alignment.status is EvaluationPolicyAlignmentStatus.CONFLICT:
+                if evaluation_policy is not None and evaluation_policy!=evaluation_alignment.resolved_policy:
+                    blockers.append(self._block("paper_evaluation_policy_override_forbidden",paper_exp.experiment_id,"Paper-explicit evaluation policy remains authoritative when repository behavior deviates.",evaluation_alignment.alignment_id,evaluation_alignment.conflict_id));continue
+                evaluation_policy=evaluation_alignment.resolved_policy
+                if not evaluation_alignment.adaptation_supported:
+                    blockers.append(self._block("repository_evaluation_deviation_not_adaptable",paper_exp.experiment_id,"Repository evaluation behavior conflicts with the paper and no evidenced sandbox adaptation is available.",evaluation_alignment.alignment_id,evaluation_alignment.conflict_id));continue
+            if evaluation_policy is None and evaluation_alignment is not None:evaluation_policy=evaluation_alignment.resolved_policy
+            production_selection=bool(spec.selected_experiment_ids)
+            if production_selection and (evaluation_policy is None or not evaluation_policy.is_resolved):
+                blockers.append(self._block("unresolved_evaluation_policy",paper_exp.experiment_id,"Final-result checkpoint, reporting and aggregation policy must be resolved before execution.",evaluation_alignment.alignment_id if evaluation_alignment else record.alignment_id,evaluation_alignment.conflict_id if evaluation_alignment else None));continue
+            action_plan=None
+            if evaluation_policy is not None and evaluation_policy.is_resolved:
+                evaluation_command=None
+                if evaluation_alignment is not None:
+                    policy_records=[repository_evaluation_policies[x] for x in evaluation_alignment.repository_policy_ids if x in repository_evaluation_policies]
+                    evaluation_ids=tuple(dict.fromkeys(x.evaluation_command_id for x in policy_records if x.evaluation_command_id))
+                    if len(evaluation_ids)>1:
+                        blockers.append(self._block("ambiguous_evaluation_command",paper_exp.experiment_id,"Multiple final evaluation commands remain unresolved.",evaluation_alignment.alignment_id));continue
+                    if evaluation_ids:
+                        evaluation_command=self._repository_command(evaluation_ids[0],repo)
+                        if evaluation_command is None:
+                            blockers.append(self._block("invalid_evaluation_command",paper_exp.experiment_id,"Final evaluation command cannot be converted to a structured argv command.",evaluation_alignment.alignment_id));continue
+                action_plan=self.action_planner.build(paper_exp.experiment_id,evaluation_policy,resolved,evaluation_command)
+                source=DecisionSource.USER if paper_exp.experiment_id in overrides.evaluation_policies else DecisionSource.ALIGNMENT
+                evaluation_decision=PlannerDecision(decision_id=_id("decision",paper_exp.experiment_id,"evaluation_policy"),experiment_id=paper_exp.experiment_id,semantic_key="evaluation_policy",selected_value=evaluation_policy.model_dump(mode="json"),source=source,policy=policy,reason="Final-result policy is resolved before execution and locked into the action plan.",paper_evidence=() if evaluation_alignment is None else evaluation_alignment.paper_evidence,repository_evidence=() if evaluation_alignment is None else evaluation_alignment.repository_evidence,alignment_reference=None if evaluation_alignment is None else evaluation_alignment.alignment_id,confidence=1 if source is DecisionSource.USER else evaluation_alignment.confidence)
+                decisions.append(evaluation_decision);exp_decisions.append(evaluation_decision.decision_id)
             environment=self._environment(repo)
             claims=tuple(dict.fromkeys([x.id for x in paper_exp.claims]+[x.id for x in paper.paper_claims if x.target_id==paper_exp.experiment_id]))
             claim_records={x.id:x for x in (*paper_exp.claims,*paper.paper_claims)}
@@ -104,14 +136,15 @@ class DeterministicPlanBuilder:
             exp_id=_id("experiment",spec.id,paper_exp.experiment_id)
             task={ExperimentType.ABLATION:ExperimentTaskType.ABLATION,ExperimentType.BASELINE:ExperimentTaskType.BASELINE_REPRODUCTION}.get(paper_exp.experiment_type,ExperimentTaskType.FULL_REPRODUCTION)
             legacy_dataset=DatasetSource(uri=dataset_req.binding,name=dataset_req.name) if dataset_req is not None and dataset_req.binding else None
-            experiments.append(ExperimentSpecification(id=exp_id,name=paper_exp.name,description=f"Planned reproduction of paper experiment {paper_exp.experiment_id}.",task_type=task,repository=RepositorySource(uri=repo.repository.source_uri,revision=repo.resolved_commit_sha),dataset=legacy_dataset,entrypoint=ep.path,resolved_command=resolved,dataset_requirement=dataset_req,environment_requirement=environment,resource_requirement=self._resources(environment),hyperparameters=values,expected_metrics=metrics,expected_claim_ids=claims,provenance_decision_ids=tuple(exp_decisions),tags=(paper_exp.experiment_type.value,),metadata={"paper_experiment_id":paper_exp.experiment_id,"alignment_id":record.alignment_id,"repository_snapshot_id":repo.snapshot_id,"implementation_id":record.repository_implementation_ids[0] if len(record.repository_implementation_ids)==1 else None}))
+            experiments.append(ExperimentSpecification(id=exp_id,name=paper_exp.name,description=f"Planned reproduction of paper experiment {paper_exp.experiment_id}.",task_type=task,repository=RepositorySource(uri=repo.repository.source_uri,revision=repo.resolved_commit_sha),dataset=legacy_dataset,entrypoint=ep.path,resolved_command=resolved,dataset_requirement=dataset_req,environment_requirement=environment,resource_requirement=self._resources(environment),hyperparameters=values,expected_metrics=metrics,expected_claim_ids=claims,evaluation_policy=evaluation_policy,action_plan=action_plan,provenance_decision_ids=tuple(exp_decisions),tags=(paper_exp.experiment_type.value,),metadata={"paper_experiment_id":paper_exp.experiment_id,"alignment_id":record.alignment_id,"repository_snapshot_id":repo.snapshot_id,"implementation_id":record.repository_implementation_ids[0] if len(record.repository_implementation_ids)==1 else None,"requires_final_result":bool(action_plan)}))
         dependencies=[]; by_paper={x.metadata.get("paper_experiment_id"):x.id for x in experiments}
         for child,parents in overrides.dependencies.items():
             if child in by_paper and all(x in by_paper for x in parents): dependencies.append(ExperimentDependency(experiment_id=by_paper[child],depends_on_experiment_ids=tuple(by_paper[x] for x in parents),reason="Explicit planning dependency."))
             else: blockers.append(self._block("invalid_dependency",child,"Dependency references an unplanned experiment."))
         order=self._order(tuple(x.id for x in experiments),dependencies,blockers)
         status=PlanStatus.BLOCKED if blockers else (PlanStatus.NEEDS_CONFIRMATION if unresolved else PlanStatus.READY)
-        return ReproductionExecutionPlan(plan_id=_id("plan",spec.id,alignment.catalog_id,policy.value),reproduction_specification_id=spec.id,paper=paper.paper,repository=repo.repository,repository_snapshot_id=repo.snapshot_id,resolved_commit_sha=repo.resolved_commit_sha,alignment_catalog_id=alignment.catalog_id,policy=policy,target_experiment_ids=tuple(x.experiment_id for x in selected),experiments=tuple(experiments),execution_order=order,dependencies=tuple(dependencies),warnings=tuple(paper.extraction_metadata.warnings)+tuple(repo.analysis_metadata.warnings)+tuple(alignment.alignment_metadata.warnings),blockers=tuple(blockers),decisions=tuple(decisions),unresolved_items=tuple(unresolved),status=status,metadata=PlanningMetadata(stages_completed=("target_resolution","policy_resolution","execution_specification"),prompt_versions={}))
+        evaluation_warnings=tuple(value for item in evaluation_alignments.values() if item.paper_experiment_id in {x.experiment_id for x in selected} for value in item.warnings)
+        return ReproductionExecutionPlan(plan_id=_id("plan",spec.id,alignment.catalog_id,policy.value),reproduction_specification_id=spec.id,paper=paper.paper,repository=repo.repository,repository_snapshot_id=repo.snapshot_id,resolved_commit_sha=repo.resolved_commit_sha,alignment_catalog_id=alignment.catalog_id,policy=policy,target_experiment_ids=tuple(x.experiment_id for x in selected),experiments=tuple(experiments),execution_order=order,dependencies=tuple(dependencies),warnings=tuple(dict.fromkeys((*paper.extraction_metadata.warnings,*repo.analysis_metadata.warnings,*alignment.alignment_metadata.warnings,*evaluation_warnings))),blockers=tuple(blockers),decisions=tuple(decisions),unresolved_items=tuple(unresolved),status=status,metadata=PlanningMetadata(stages_completed=("target_resolution","policy_resolution","execution_specification"),prompt_versions={}))
 
     def _targets(self,spec,paper,blockers):
         if spec.selected_experiment_ids:
@@ -192,6 +225,13 @@ class DeterministicPlanBuilder:
 
     def _resources(self,env):
         return ResourceRequirement(gpu_required=True if env.cuda_hints else None,notes=("GPU count is intentionally unspecified; repository evidence does not establish it.",) if env.cuda_hints else ())
+
+    def _repository_command(self,command_id,repo):
+        command=next((x for x in repo.commands if x.command_id==command_id),None)
+        if command is None or command.entrypoint_path is None:return None
+        entry=next((x for x in repo.entrypoints if x.path==command.entrypoint_path),None)
+        return ExecutableCommand(program=(entry.interpreter if entry and entry.interpreter else "python"),arguments=(command.entrypoint_path,*command.arguments),entrypoint_id=None if entry is None else entry.entrypoint_id,command_reference_id=command.command_id,environment_variable_references=command.environment_variables)
+
 
     def _block(self,code,exp,message,alignment=None,conflict=None):
         return PlanBlocker(blocker_id=_id("blocker",code,exp),code=code,message=message,severity=BlockerSeverity.BLOCKING,paper_experiment_id=exp,alignment_reference=alignment,conflict_id=conflict)

@@ -54,6 +54,8 @@ class CurieInputTranslator:
                 "expected_claim_ids",
                 list(specification.expected_claim_ids),
             ),
+            self._constraint("evaluation_policy",None if specification.evaluation_policy is None else specification.evaluation_policy.model_dump(mode="json")),
+            self._constraint("action_plan",None if specification.action_plan is None else specification.action_plan.model_dump(mode="json")),
         ]
         locked.extend(
             self._constraint(

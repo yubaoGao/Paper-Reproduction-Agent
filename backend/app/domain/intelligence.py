@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 from pydantic import Field, JsonValue, model_validator
-from .experiment import DomainModel, NonEmptyStr
+from .experiment import DomainModel, EvaluationPolicy, EvaluationPolicySource, NonEmptyStr
 from .reproduction import EvidenceReference, PaperClaim, PaperReference, ReproductionParameter, ReproductionSpecification
 
 class ExperimentType(str, Enum):
@@ -33,6 +33,7 @@ class PaperExperimentRecord(DomainModel):
     conditions: dict[NonEmptyStr,JsonValue]=Field(default_factory=dict)
     parameters: tuple[ReproductionParameter,...]=()
     claims: tuple[PaperClaim,...]=()
+    evaluation_policy: EvaluationPolicy|None=None
     evidence: tuple[EvidenceReference,...]=()
     source_sections: tuple[NonEmptyStr,...]=()
     source_tables: tuple[NonEmptyStr,...]=()
@@ -42,6 +43,7 @@ class PaperExperimentRecord(DomainModel):
         if self.experiment_type is ExperimentType.ABLATION and not self.variant: raise ValueError("ablation experiment requires a variant")
         if len({x.id for x in self.claims})!=len(self.claims): raise ValueError("experiment claim ids must be unique")
         if len({x.name.casefold() for x in self.parameters})!=len(self.parameters): raise ValueError("parameter names must be unique")
+        if self.evaluation_policy is not None and self.evaluation_policy.source is not EvaluationPolicySource.PAPER_EXPLICIT: raise ValueError("paper experiment evaluation policy must be PAPER_EXPLICIT")
         return self
 
 class ConflictCandidate(DomainModel):
@@ -87,6 +89,7 @@ class PaperExperimentCatalog(DomainModel):
     experiments: tuple[PaperExperimentRecord,...]=()
     training_parameters: tuple[ReproductionParameter,...]=()
     evaluation_parameters: tuple[ReproductionParameter,...]=()
+    evaluation_policy: EvaluationPolicy|None=None
     paper_claims: tuple[PaperClaim,...]=()
     evidence: tuple[EvidenceReference,...]=()
     conflicts: tuple[ExtractionConflict,...]=()
@@ -101,6 +104,7 @@ class PaperExperimentCatalog(DomainModel):
         if len(claims)!=len(set(claims)): raise ValueError("claim ids must be unique")
         known=set(ids)
         if any(x.parent_experiment_id and x.parent_experiment_id not in known for x in self.experiments): raise ValueError("dangling parent experiment")
+        if self.evaluation_policy is not None and self.evaluation_policy.source is not EvaluationPolicySource.PAPER_EXPLICIT: raise ValueError("paper catalog evaluation policy must be PAPER_EXPLICIT")
         if self.extraction_status is ExtractionStatus.FAILED: raise ValueError("failed extraction is represented by exception")
         if self.extraction_status is ExtractionStatus.PARTIAL and not self.extraction_metadata.missing_components: raise ValueError("partial extraction requires missing components")
         return self

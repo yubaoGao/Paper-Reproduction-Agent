@@ -18,6 +18,8 @@ Task 08A 之后，production `ReproductionSpecification.selected_experiment_ids`
 
 `DatasetRequirement` 保存数据集名称、真实绑定、split、预处理假设、loader 引用、双方证据与可用状态；没有用户路径时保持待绑定，不伪造路径。`EnvironmentRequirement` 描述 Python、依赖、框架、manifest 和 CUDA 提示，不安装环境。`ResourceRequirement` 只保存有证据的 GPU/CPU/内存要求，未知的 GPU 数量、显存与 CPU 均保持未知。
 
+Production selected-paper-experiment path 还必须拥有 resolved `EvaluationPolicy`。Planner 不重新解释最终结果规则；它使用 Task 07 resolution 或带来源标记的 override，并展开为 `TRAIN`、可选 `EVALUATE`、多 run 时 `AGGREGATE` 的 `ExperimentActionPlan`。UNKNOWN 或 evaluation conflict 会阻断计划。
+
 预期结果仍来自 `PaperClaim`，仅转换为比较用的 `MetricExpectation`，不会伪装成实际运行 `Metric`。“All Ablations” 会按论文消融逐项展开，每项必须有 Task 07 的仓库机制证据；布尔 `false` 与数值 `0` 都会被准确保留。显式实验依赖经过引用检查和拓扑排序，环会阻塞计划。
 
 ## Agent、模型路由与验证

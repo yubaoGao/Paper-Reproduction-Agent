@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from urllib.parse import urlsplit
 from pydantic import Field,JsonValue,model_validator
-from .experiment import DomainModel,NonEmptyStr
+from .experiment import DomainModel,EvaluationPolicy,NonEmptyStr
 from .reproduction import EvidenceReference,InformationStatus
 
 class RepositorySourceType(str,Enum): LOCAL_DIRECTORY="local_directory"; GIT_URL="git_url"
@@ -67,6 +67,21 @@ class RepositoryCommand(DomainModel): command_id:NonEmptyStr; source_path:NonEmp
 class RepositoryComponentRecord(DomainModel): component_id:NonEmptyStr; name:NonEmptyStr; kind:NonEmptyStr; paths:tuple[NonEmptyStr,...]; symbol_ids:tuple[NonEmptyStr,...]=(); details:dict[NonEmptyStr,JsonValue]=Field(default_factory=dict); evidence:tuple[EvidenceReference,...]
 class RepositoryExperimentImplementation(DomainModel):
     implementation_id:NonEmptyStr; name:NonEmptyStr; entrypoint_ids:tuple[NonEmptyStr,...]=Field(min_length=1); config_ids:tuple[NonEmptyStr,...]=(); dataset_ids:tuple[NonEmptyStr,...]=(); model_ids:tuple[NonEmptyStr,...]=(); parameter_keys:tuple[NonEmptyStr,...]=(); command_ids:tuple[NonEmptyStr,...]=(); evidence:tuple[EvidenceReference,...]=Field(min_length=1)
+class RepositoryEvaluationPolicyRecord(DomainModel):
+    policy_id:NonEmptyStr
+    policy:EvaluationPolicy
+    implementation_id:NonEmptyStr|None=None
+    entrypoint_ids:tuple[NonEmptyStr,...]=()
+    training_command_id:NonEmptyStr|None=None
+    evaluation_command_id:NonEmptyStr|None=None
+    paper_policy_adaptation_supported:bool=False
+    evidence:tuple[EvidenceReference,...]=Field(min_length=1)
+    @model_validator(mode="after")
+    def explicit_code_policy(self):
+        if self.policy.source.value!="code_explicit":raise ValueError("repository evaluation policy must be CODE_EXPLICIT")
+        if not self.policy.evidence:raise ValueError("repository evaluation policy requires policy evidence")
+        if self.paper_policy_adaptation_supported and self.evaluation_command_id is None:raise ValueError("paper-policy adaptation requires an explicit evaluation command")
+        return self
 class RepositoryConflictCandidate(DomainModel): value:JsonValue; evidence:tuple[EvidenceReference,...]
 class RepositoryConflict(DomainModel):
     conflict_id:NonEmptyStr; semantic_key:NonEmptyStr; conflict_type:RepositoryConflictType; candidates:tuple[RepositoryConflictCandidate,...]=Field(min_length=2); status:RepositoryConflictStatus=RepositoryConflictStatus.UNRESOLVED; resolution:JsonValue|None=None; reasoning:NonEmptyStr|None=None
@@ -81,7 +96,7 @@ class RepositoryFact(DomainModel): name:NonEmptyStr; value:JsonValue|None=None; 
 class RepositoryAnalysisMetadata(DomainModel): stages_completed:tuple[NonEmptyStr,...]=(); missing_components:tuple[NonEmptyStr,...]=(); warnings:tuple[NonEmptyStr,...]=(); prompt_versions:dict[NonEmptyStr,NonEmptyStr]=Field(default_factory=dict)
 class RepositoryAnalysisCatalog(DomainModel):
     catalog_id:NonEmptyStr; repository:RepositoryReference; snapshot_id:NonEmptyStr; resolved_commit_sha:NonEmptyStr; languages:tuple[NonEmptyStr,...]
-    project_structure:tuple[NonEmptyStr,...]=(); code_index:CodeIndex=Field(default_factory=CodeIndex); documentation:tuple[RepositoryComponentRecord,...]=(); environment_definitions:tuple[RepositoryComponentRecord,...]=(); dependencies:tuple[DependencyRecord,...]=(); entrypoints:tuple[EntrypointCandidate,...]=(); configurations:tuple[RepositoryConfigRecord,...]=(); datasets:tuple[RepositoryComponentRecord,...]=(); models:tuple[RepositoryComponentRecord,...]=(); experiment_implementations:tuple[RepositoryExperimentImplementation,...]=(); ablation_mechanisms:tuple[RepositoryComponentRecord,...]=(); metrics:tuple[RepositoryComponentRecord,...]=(); checkpoints:tuple[RepositoryComponentRecord,...]=(); artifact_paths:tuple[RepositoryComponentRecord,...]=(); commands:tuple[RepositoryCommand,...]=(); evidence:tuple[EvidenceReference,...]=(); conflicts:tuple[RepositoryConflict,...]=(); unknowns:tuple[RepositoryFact,...]=(); analysis_status:RepositoryAnalysisStatus; analysis_metadata:RepositoryAnalysisMetadata
+    project_structure:tuple[NonEmptyStr,...]=(); code_index:CodeIndex=Field(default_factory=CodeIndex); documentation:tuple[RepositoryComponentRecord,...]=(); environment_definitions:tuple[RepositoryComponentRecord,...]=(); dependencies:tuple[DependencyRecord,...]=(); entrypoints:tuple[EntrypointCandidate,...]=(); configurations:tuple[RepositoryConfigRecord,...]=(); datasets:tuple[RepositoryComponentRecord,...]=(); models:tuple[RepositoryComponentRecord,...]=(); experiment_implementations:tuple[RepositoryExperimentImplementation,...]=(); evaluation_policies:tuple[RepositoryEvaluationPolicyRecord,...]=(); ablation_mechanisms:tuple[RepositoryComponentRecord,...]=(); metrics:tuple[RepositoryComponentRecord,...]=(); checkpoints:tuple[RepositoryComponentRecord,...]=(); artifact_paths:tuple[RepositoryComponentRecord,...]=(); commands:tuple[RepositoryCommand,...]=(); evidence:tuple[EvidenceReference,...]=(); conflicts:tuple[RepositoryConflict,...]=(); unknowns:tuple[RepositoryFact,...]=(); analysis_status:RepositoryAnalysisStatus; analysis_metadata:RepositoryAnalysisMetadata
     @model_validator(mode="after")
     def validate_catalog(self):
         if self.analysis_status is RepositoryAnalysisStatus.FAILED: raise ValueError("failed analysis is represented by exception")
@@ -89,6 +104,8 @@ class RepositoryAnalysisCatalog(DomainModel):
         for records,label in ((self.entrypoints,"entrypoint"),(self.configurations,"config"),(self.dependencies,"dependency"),(self.experiment_implementations,"implementation")):
             ids=[getattr(x,f"{label}_id") for x in records]
             if len(ids)!=len(set(ids)): raise ValueError(f"duplicate {label} ids")
+        policy_ids=[x.policy_id for x in self.evaluation_policies]
+        if len(policy_ids)!=len(set(policy_ids)):raise ValueError("duplicate evaluation policy ids")
         return self
 class RepositoryAnalysisTrace(DomainModel):
     analysis_id:NonEmptyStr; repository_id:NonEmptyStr; commit_sha:NonEmptyStr; started_at:datetime; finished_at:datetime; selected_files:tuple[NonEmptyStr,...]=(); selected_symbols:tuple[NonEmptyStr,...]=(); primary_calls:int=Field(ge=0); fast_calls:int=Field(ge=0); repair_count:int=Field(ge=0); prompt_versions:dict[NonEmptyStr,NonEmptyStr]; usage:tuple[JsonValue,...]=(); warnings:tuple[NonEmptyStr,...]=(); status:RepositoryAnalysisStatus
