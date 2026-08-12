@@ -21,6 +21,7 @@ from .repository_analysis import (
 )
 from .alignment import AlignmentSettings,AlignmentValidationError,PaperCodeAlignmentError
 from .planning import PlanningSettings,PlanningValidationError,ReproductionPlanningError
+from .reproduction_intake import ReproductionIntakeError,ReproductionIntakeService
 
 __all__ = [
     "CompositePaperParser",
@@ -40,4 +41,5 @@ __all__ = [
     "UnsafeRepositorySourceError",
     "AlignmentSettings","AlignmentValidationError","PaperCodeAlignmentError",
     "PlanningSettings","PlanningValidationError","ReproductionPlanningError",
+    "ReproductionIntakeError","ReproductionIntakeService",
 ]

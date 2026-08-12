@@ -114,6 +114,31 @@ class DeterministicPlanBuilder:
         return ReproductionExecutionPlan(plan_id=_id("plan",spec.id,alignment.catalog_id,policy.value),reproduction_specification_id=spec.id,paper=paper.paper,repository=repo.repository,repository_snapshot_id=repo.snapshot_id,resolved_commit_sha=repo.resolved_commit_sha,alignment_catalog_id=alignment.catalog_id,policy=policy,target_experiment_ids=tuple(x.experiment_id for x in selected),experiments=tuple(experiments),execution_order=order,dependencies=tuple(dependencies),warnings=tuple(paper.extraction_metadata.warnings)+tuple(repo.analysis_metadata.warnings)+tuple(alignment.alignment_metadata.warnings),blockers=tuple(blockers),decisions=tuple(decisions),unresolved_items=tuple(unresolved),status=status,metadata=PlanningMetadata(stages_completed=("target_resolution","policy_resolution","execution_specification"),prompt_versions={}))
 
     def _targets(self,spec,paper,blockers):
+        if spec.selected_experiment_ids:
+            by_id={item.experiment_id:item for item in paper.experiments}
+            result=[]
+            for experiment_id in spec.selected_experiment_ids:
+                item=by_id.get(experiment_id)
+                if item is None:
+                    blockers.append(self._block("target_not_found",experiment_id,"Selected paper experiment id is absent from the catalog."))
+                else: result.append(item)
+            return result
+
+        bound_ids=tuple(target.paper_experiment_id for target in spec.targets if target.paper_experiment_id)
+        if bound_ids:
+            if len(bound_ids)!=len(spec.targets):
+                blockers.append(self._block("mixed_target_binding",spec.id,"Exact paper-experiment targets cannot be mixed with legacy attribute targets."))
+                return []
+            by_id={item.experiment_id:item for item in paper.experiments}
+            result=[]
+            for experiment_id in bound_ids:
+                item=by_id.get(experiment_id)
+                if item is None: blockers.append(self._block("target_not_found",experiment_id,"Bound paper experiment id is absent from the catalog."))
+                elif item.experiment_id not in {x.experiment_id for x in result}: result.append(item)
+            return result
+
+        # Compatibility only: legacy/custom specifications created before
+        # ExperimentSelection may still use bounded catalog attributes.
         result=[]
         for target in spec.targets:
             text=" ".join(x for x in (target.experiment_name,target.description) if x)

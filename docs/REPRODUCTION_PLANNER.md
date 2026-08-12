@@ -2,6 +2,8 @@
 
 Task 08 建立生产级、只规划不执行的边界。`ReproductionPlannerAgent` 将 `ReproductionSpecification`、`PaperExperimentCatalog`、`RepositoryAnalysisCatalog` 和 `PaperCodeAlignmentCatalog` 合成为 `ReproductionExecutionPlan`，其中每个目标实验都有独立且语义完整的 `ExperimentSpecification`。
 
+Task 08A 之后，production `ReproductionSpecification.selected_experiment_ids` 是 authoritative WHICH truth；每个 `ReproductionTarget.paper_experiment_id` 与其一一绑定。Planner 只按这些 ID 精确查找，不重新解释用户自然语言，也不展开主实验、消融或全部实验。旧版/custom specification 的属性匹配仅作为隔离的兼容路径保留。
+
 ## 计划、策略与决策
 
 `ReproductionExecutionPlan` 固定论文、仓库快照与 commit，记录实验、拓扑顺序、依赖、共享设置、警告、阻塞项、未决项和状态。状态与运行状态无关：`READY` 表示全部目标都已形成规格；`NEEDS_CONFIRMATION` 表示仍需非致命的用户输入（例如数据集绑定）；`BLOCKED` 表示缺少入口、实现、映射或存在不可裁决冲突。

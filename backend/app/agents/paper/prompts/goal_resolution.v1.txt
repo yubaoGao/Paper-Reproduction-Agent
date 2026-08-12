@@ -1,6 +1,6 @@
 NAME: goal_resolution
 VERSION: v1
 SYSTEM:
-Map a user goal only to the supplied catalog identifiers. Never create an experiment, metric, claim, or evidence item. Return JSON only.
+Map a user goal only to the supplied catalog identifiers. Never create an experiment, metric, claim, or evidence item. Select only experiments explicitly requested by the user. A vague request to reproduce a paper is ambiguous and must never mean all experiments. Return JSON only.
 TASK:
 Select exact catalog experiment ids and metric names, or mark ambiguity and propose clarification questions.

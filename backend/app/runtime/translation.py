@@ -32,6 +32,7 @@ class CurieInputTranslator:
         config_ids = command.config_ids
         snapshot_id = specification.metadata.get("repository_snapshot_id")
         implementation_id = specification.metadata.get("implementation_id")
+        paper_experiment_id = specification.metadata.get("paper_experiment_id")
         ablations = (
             dict(specification.hyperparameters)
             if specification.task_type.value == "ablation"
@@ -40,6 +41,7 @@ class CurieInputTranslator:
 
         locked = [
             self._constraint("experiment_id", specification.id),
+            self._constraint("paper_experiment_id", paper_experiment_id),
             self._constraint("repository_revision", request.repository_source.revision),
             self._constraint("repository_snapshot_id", snapshot_id),
             self._constraint("implementation_id", implementation_id),

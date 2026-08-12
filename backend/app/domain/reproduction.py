@@ -142,6 +142,7 @@ class ReproductionTarget(DomainModel):
 
     id: NonEmptyStr
     target_type: TargetType
+    paper_experiment_id: NonEmptyStr | None = None
     section: NonEmptyStr | None = None
     table: NonEmptyStr | None = None
     figure: NonEmptyStr | None = None
@@ -154,6 +155,7 @@ class ReproductionTarget(DomainModel):
     @model_validator(mode="after")
     def require_target_scope(self) -> ReproductionTarget:
         scope = (
+            self.paper_experiment_id,
             self.section,
             self.table,
             self.figure,
@@ -236,6 +238,7 @@ class ReproductionSpecification(DomainModel):
     paper: PaperReference
     user_goal: NonEmptyStr
     targets: tuple[ReproductionTarget, ...]
+    selected_experiment_ids: tuple[NonEmptyStr, ...] = ()
     claims: tuple[PaperClaim, ...] = ()
     ablations: tuple[AblationDefinition, ...] = ()
     parameters: tuple[ReproductionParameter, ...] = ()
@@ -253,10 +256,22 @@ class ReproductionSpecification(DomainModel):
         parameter_names = [parameter.name for parameter in self.parameters]
 
         self._require_unique(target_ids, "target ids")
+        self._require_unique(list(self.selected_experiment_ids), "selected experiment ids")
         self._require_unique(claim_ids, "claim ids")
         self._require_unique(ablation_ids, "ablation ids")
         self._require_unique(parameter_names, "parameter names")
         self._require_unique(list(self.constraints), "constraints")
+
+        if self.selected_experiment_ids:
+            bound_ids=tuple(
+                target.paper_experiment_id
+                for target in self.targets
+                if target.paper_experiment_id is not None
+            )
+            if bound_ids!=self.selected_experiment_ids or len(bound_ids)!=len(self.targets):
+                raise ValueError(
+                    "production targets must exactly bind the selected paper experiments"
+                )
 
         known_targets = set(target_ids)
         for claim in self.claims:

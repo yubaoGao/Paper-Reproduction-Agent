@@ -62,10 +62,10 @@ from .paper import (
 )
 from .intelligence import (
     CatalogEntity, ConflictCandidate, ConflictStatus, ConflictType,
-    ExperimentType, ExtractionConflict, ExtractionMetadata, ExtractionStatus,
+    ExperimentSelection, ExperimentType, ExtractionConflict, ExtractionMetadata, ExtractionStatus,
     ExtractionTrace, FigureObservation, GoalResolutionResult,
     GoalResolutionStatus, PaperExperimentCatalog, PaperExperimentRecord,
-    UserReproductionGoal,
+    SelectionMode, UserReproductionGoal,
 )
 from .repository import (
     CliArgument,CodeIndex,CodeSymbol,DependencyRecord,EntrypointCandidate,EntrypointType,GitLfsPointer,
@@ -147,6 +147,7 @@ __all__ = [
     "ConflictCandidate",
     "ConflictStatus",
     "ConflictType",
+    "ExperimentSelection",
     "ExperimentType",
     "ExtractionConflict",
     "ExtractionMetadata",
@@ -157,6 +158,7 @@ __all__ = [
     "GoalResolutionStatus",
     "PaperExperimentCatalog",
     "PaperExperimentRecord",
+    "SelectionMode",
     "UserReproductionGoal",
     "CliArgument","CodeIndex","CodeSymbol","DependencyRecord","EntrypointCandidate","EntrypointType","GitLfsPointer",
     "RepositoryAnalysisCatalog","RepositoryAnalysisMetadata","RepositoryAnalysisStatus","RepositoryAnalysisTrace",

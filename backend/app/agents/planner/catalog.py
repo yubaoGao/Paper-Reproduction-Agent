@@ -5,6 +5,8 @@ from backend.app.services import PlanningValidationError
 class ReproductionPlanValidator:
     def validate_inputs(self,spec,paper,repo,alignment):
         if spec.paper.id!=paper.paper.id or paper.paper.id!=alignment.paper.id: raise PlanningValidationError("paper identity mismatch")
+        known={item.experiment_id for item in paper.experiments}
+        if spec.selected_experiment_ids and not set(spec.selected_experiment_ids)<=known: raise PlanningValidationError("selected experiment identity is absent from paper catalog")
         if paper.catalog_id!=alignment.paper_catalog_id: raise PlanningValidationError("paper catalog identity mismatch")
         if repo.catalog_id!=alignment.repository_catalog_id: raise PlanningValidationError("repository catalog identity mismatch")
         if repo.repository.repository_id!=alignment.repository.repository_id: raise PlanningValidationError("repository identity mismatch")

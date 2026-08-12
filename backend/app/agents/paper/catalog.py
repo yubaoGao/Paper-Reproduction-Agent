@@ -9,6 +9,7 @@ from backend.app.domain import (
     ReproductionParameter,
 )
 from .evidence import EvidenceValidationError, EvidenceValidator
+from .identity import StableExperimentIdentityGenerator
 from .schemas import StageExtraction
 
 class PaperExtractionError(RuntimeError): pass
@@ -23,13 +24,18 @@ def _unique(items):
     return tuple(result)
 
 class CatalogMerger:
+    def __init__(self, identity_generator: StableExperimentIdentityGenerator | None = None):
+        self.identity_generator = identity_generator or StableExperimentIdentityGenerator()
+
     def merge(self,document:PaperDocument,stages:tuple[StageExtraction,...],*,missing=(),warnings=(),figure_observations=()):
         datasets=self._entities([x for stage in stages for x in stage.datasets])
         models=self._entities([x for stage in stages for x in stage.model_variants])
-        experiments=self._experiments([x for stage in stages for x in stage.experiments])
+        raw_experiments=[x for stage in stages for x in stage.experiments]
+        experiments,references=self.identity_generator.assign(document.paper,raw_experiments,datasets=datasets,models=models)
         training=self._parameters([x for stage in stages for x in stage.training_parameters])
         evaluation=self._parameters([x for stage in stages for x in stage.evaluation_parameters])
-        claims,conflicts=self._claims([x for stage in stages for x in stage.claims],experiments)
+        stage_claims=self.identity_generator.remap_claims([x for stage in stages for x in stage.claims],references)
+        claims,conflicts=self._claims(stage_claims,experiments)
         evidence=_unique([x for stage in stages for x in stage.evidence])
         stage_missing=tuple(x for stage in stages for x in stage.missing_components)
         stage_warnings=tuple(x for stage in stages for x in stage.warnings)
@@ -56,15 +62,6 @@ class CatalogMerger:
             aliases=tuple(dict.fromkeys(x for value in values for x in (value.canonical_name,*value.aliases) if x.casefold()!=canonical.casefold()))
             result.append(CatalogEntity(canonical_name=canonical,aliases=aliases,evidence=_unique([x for value in values for x in value.evidence])))
         return tuple(result)
-    def _experiments(self,items):
-        groups={}
-        for item in items:
-            key=(item.experiment_type,_norm(item.dataset),_norm(item.model),_norm(item.variant or item.name))
-            if key not in groups: groups[key]=item; continue
-            old=groups[key]
-            claims=_unique((*old.claims,*item.claims)); evidence=_unique((*old.evidence,*item.evidence)); params=self._parameters((*old.parameters,*item.parameters))
-            groups[key]=old.model_copy(update={"claims":claims,"evidence":evidence,"parameters":params,"source_sections":tuple(dict.fromkeys((*old.source_sections,*item.source_sections))),"source_tables":tuple(dict.fromkeys((*old.source_tables,*item.source_tables))),"source_figures":tuple(dict.fromkeys((*old.source_figures,*item.source_figures)))})
-        return tuple(groups.values())
     def _parameters(self,items):
         result={}
         for item in items:
