@@ -85,6 +85,11 @@ from .planner import (
     BlockerSeverity,DecisionSource,ExperimentDependency,PlanBlocker,PlanningMetadata,PlanningOverrides,
     PlanningTrace,PlannerDecision,PlanStatus,ReproductionExecutionPlan,ReproductionPolicy,UnresolvedPlanItem,
 )
+from .reproduction_run import (
+    ArtifactReference, AttemptRecord, AttemptStatus, FailureCategory, FailureRecord,
+    PatchRecord, PatchStatus, ReproductionRun, RunManifest, StepRun, StepStatus,
+    ValidationPhase, ValidationRecord,
+)
 
 __all__ = [
     "AblationDefinition",
@@ -165,4 +170,7 @@ __all__ = [
     "ParameterAlignment","ParameterMappingStatus","UnmatchedAlignmentItem",
     "BlockerSeverity","DecisionSource","ExperimentDependency","PlanBlocker","PlanningMetadata","PlanningOverrides",
     "PlanningTrace","PlannerDecision","PlanStatus","ReproductionExecutionPlan","ReproductionPolicy","UnresolvedPlanItem",
+    "ArtifactReference","AttemptRecord","AttemptStatus","FailureCategory","FailureRecord",
+    "PatchRecord","PatchStatus","ReproductionRun","RunManifest","StepRun","StepStatus",
+    "ValidationPhase","ValidationRecord",
 ]
