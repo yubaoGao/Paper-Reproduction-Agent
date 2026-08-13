@@ -20,6 +20,7 @@ class ReproductionJobRow(PersistenceBase):
     )
 
     job_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    owner_principal: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     paper_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     paper_title: Mapped[str] = mapped_column(Text, nullable=False)
     user_goal: Mapped[str] = mapped_column(Text, nullable=False)
@@ -36,6 +37,41 @@ class ReproductionJobRow(PersistenceBase):
     job_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class ReproductionIntakeRow(PersistenceBase):
+    __tablename__ = "reproduction_intakes"
+
+    intake_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    owner_principal: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("reproduction_jobs.job_id", ondelete="SET NULL"), unique=True, index=True
+    )
+    intake_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class ReproductionEventRow(PersistenceBase):
+    __tablename__ = "reproduction_events"
+    __table_args__ = (
+        Index("ix_reproduction_events_intake_sequence", "intake_id", "sequence"),
+        Index("ix_reproduction_events_job_sequence", "job_id", "sequence"),
+    )
+
+    sequence: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    intake_id: Mapped[str] = mapped_column(
+        ForeignKey("reproduction_intakes.intake_id", ondelete="CASCADE"), nullable=False
+    )
+    job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("reproduction_jobs.job_id", ondelete="CASCADE")
+    )
+    owner_principal: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
 class PlanningSnapshotRow(PersistenceBase):

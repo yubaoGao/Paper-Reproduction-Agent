@@ -127,6 +127,10 @@ from .reproduction_run import (
     PatchRecord, PatchStatus, ReproductionRun, RunManifest, StepRun, StepStatus,
     ValidationPhase, ValidationRecord,
 )
+from .product_events import (
+    ReproductionEvent, ReproductionEventType, ReproductionIntake,
+    ReproductionIntakeState,
+)
 
 __all__ = [
     "AblationDefinition",
@@ -216,6 +220,8 @@ __all__ = [
     "ArtifactReference","AttemptRecord","AttemptStatus","FailureCategory","FailureRecord",
     "PatchRecord","PatchStatus","ReproductionRun","RunManifest","StepRun","StepStatus",
     "ValidationPhase","ValidationRecord",
+    "ReproductionEvent","ReproductionEventType","ReproductionIntake",
+    "ReproductionIntakeState",
     "ComparisonEvidenceChain","ComparisonPolicyKind","ExecutionFailureReference",
     "ExperimentComparison","ExperimentComparisonStatus","MetricComparison",
     "MetricComparisonPolicy","MetricComparisonStatus","MetricIdentity","ReproductionComparisonReport",

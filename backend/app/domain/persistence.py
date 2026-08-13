@@ -37,6 +37,7 @@ class ResultValidationStatus(str, Enum):
 
 class ReproductionJob(DomainModel):
     job_id: NonEmptyStr
+    owner_principal: NonEmptyStr = "system:legacy"
     paper: PaperReference
     user_goal: NonEmptyStr
     selection: ExperimentSelection

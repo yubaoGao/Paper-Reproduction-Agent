@@ -28,6 +28,7 @@ from .persistence import (
     ComparisonReportRepository,FinalResultRepository,PersistenceConflictError,
     PersistenceEntityNotFoundError,PersistenceUnitOfWork,PlanningSnapshotRepository,
     ReproductionJobRepository,
+    ReproductionEventRepository,ReproductionIntakeRepository,
 )
 from .job_queue import (
     DurableJobQueue,InvalidJobQueueTransition,JobLeaseConflictError,JobLeaseLostError,
@@ -47,6 +48,11 @@ from .external_resources import (
     ResolvedExternalResourceProvider,
     ResourceAwareReproductionIntakeService,
 )
+from .reproduction_api import (
+    APIUseCaseError,EntityNotFoundError,IntakeAnalysis,InvalidIntakeStateError,
+    PlanningBlockedError,ReproductionAnalysisPipeline,ReproductionAPIService,
+)
+from .product_events import ProductEventPublisher
 
 __all__ = [
     "CompositePaperParser",
@@ -72,6 +78,7 @@ __all__ = [
     "ComparisonReportRepository","FinalResultRepository","PersistenceConflictError",
     "PersistenceEntityNotFoundError","PersistenceUnitOfWork","PlanningSnapshotRepository",
     "ReproductionJobRepository",
+    "ReproductionEventRepository","ReproductionIntakeRepository",
     "DurableJobQueue","InvalidJobQueueTransition","JobLeaseConflictError","JobLeaseLostError",
     "ReproductionExecutor","ReproductionExecutorFactory",
     "ExecutionConfigApplier","GPUAllocationConflictError","GPUInventoryProvider",
@@ -85,4 +92,7 @@ __all__ = [
     "ResourceRegistry","ResourceRegistryError","ResourcesNotReadyError",
     "ResolvedExternalResourceProvider",
     "ResourceAwareReproductionIntakeService",
+    "APIUseCaseError","EntityNotFoundError","IntakeAnalysis","InvalidIntakeStateError",
+    "PlanningBlockedError","ReproductionAnalysisPipeline","ReproductionAPIService",
+    "ProductEventPublisher",
 ]

@@ -12,6 +12,7 @@ from backend.app.domain.persistence import (
     ReproductionJobStatus,
     ResultValidationStatus,
 )
+from backend.app.domain.product_events import ReproductionEvent, ReproductionEventType, ReproductionIntake
 from backend.app.orchestration.ports import ReproductionRunRepository
 from .job_queue import DurableJobQueue
 from .external_resources import ResourceRegistry
@@ -31,6 +32,27 @@ class ReproductionJobRepository(Protocol):
     def get(self, job_id: str) -> ReproductionJob: ...
     def update(self, job: ReproductionJob) -> None: ...
     def list(self, *, status: ReproductionJobStatus | None = None) -> tuple[ReproductionJob, ...]: ...
+    def list_by_owner(self, owner_principal: str) -> tuple[ReproductionJob, ...]: ...
+
+
+@runtime_checkable
+class ReproductionIntakeRepository(Protocol):
+    def create(self, intake: ReproductionIntake) -> None: ...
+    def get(self, intake_id: str) -> ReproductionIntake: ...
+    def update(self, intake: ReproductionIntake) -> None: ...
+    def list_by_owner(self, owner_principal: str) -> tuple[ReproductionIntake, ...]: ...
+
+
+@runtime_checkable
+class ReproductionEventRepository(Protocol):
+    def append(
+        self, *, intake_id: str, owner_principal: str,
+        event_type: ReproductionEventType, payload: dict,
+        job_id: str | None = None,
+    ) -> ReproductionEvent: ...
+    def list_by_intake(self, intake_id: str, *, after_sequence: int = 0) -> tuple[ReproductionEvent, ...]: ...
+    def list_by_job(self, job_id: str, *, after_sequence: int = 0) -> tuple[ReproductionEvent, ...]: ...
+    def bind_job(self, intake_id: str, job_id: str) -> None: ...
 
 
 @runtime_checkable
@@ -60,6 +82,8 @@ class ComparisonReportRepository(Protocol):
 
 @runtime_checkable
 class PersistenceUnitOfWork(Protocol):
+    intakes: ReproductionIntakeRepository
+    events: ReproductionEventRepository
     jobs: ReproductionJobRepository
     planning_snapshots: PlanningSnapshotRepository
     runs: ReproductionRunRepository
