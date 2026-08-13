@@ -30,6 +30,14 @@ class DurableJobQueue(Protocol):
         lease_seconds: int,
         now: datetime | None = None,
     ) -> ReproductionJob | None: ...
+    def claim_job(
+        self,
+        job_id: str,
+        worker_id: str,
+        *,
+        lease_seconds: int,
+        now: datetime | None = None,
+    ) -> ReproductionJob | None: ...
     def mark_running(
         self,
         job_id: str,
@@ -45,6 +53,14 @@ class DurableJobQueue(Protocol):
         lease_token: str,
         *,
         lease_seconds: int,
+        now: datetime | None = None,
+    ) -> ReproductionJob: ...
+    def defer(
+        self,
+        job_id: str,
+        worker_id: str,
+        lease_token: str,
+        *,
         now: datetime | None = None,
     ) -> ReproductionJob: ...
     def request_cancel(self, job_id: str, *, now: datetime | None = None) -> ReproductionJob: ...

@@ -96,6 +96,7 @@ class CurieInputTranslator:
             mode=ReproductionExecutionMode.REPRODUCTION,
             run_id=request.run_id,
             experiment_id=specification.id,
+            step_id=specification.id,
             objective=specification.description,
             repository_uri=request.repository_source.uri,
             repository_revision=request.repository_source.revision,

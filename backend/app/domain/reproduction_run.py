@@ -18,6 +18,7 @@ from .experiment import (
     _require_aware,
     utc_now,
 )
+from .gpu import ResourceAdaptationRecord
 
 
 class StepStatus(str, Enum):
@@ -143,6 +144,7 @@ class AttemptRecord(DomainModel):
     artifacts: tuple[ArtifactReference, ...] = ()
     metrics: tuple[Metric, ...] = ()
     final_result: FinalResult | None = None
+    resource_adaptations: tuple[ResourceAdaptationRecord, ...] = ()
 
     @field_validator("started_at", "finished_at")
     @classmethod

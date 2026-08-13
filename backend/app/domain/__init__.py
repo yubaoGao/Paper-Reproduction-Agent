@@ -104,6 +104,13 @@ from .persistence import (
     AuthoritativePlanningSnapshot, PersistedComparisonReport, PersistedFinalResult,
     ReproductionJob, ReproductionJobStatus, ResultValidationStatus,
 )
+from .gpu import (
+    AdaptedExecutionConfig, GPUDevice, GPUDeviceState, GPULease, GPURequirement,
+    GPURequestStatus, GPUSchedulingRequest, MultiGPUSemantics, PrecisionMode,
+    RepositoryResourceCapabilities, ResourceAdaptationDecision,
+    ResourceAdaptationOutcome, ResourceAdaptationReason, ResourceAdaptationRecord,
+    ResourceAdaptationRequest, SemanticImpact,
+)
 from .planner import (
     BlockerSeverity,DecisionSource,ExperimentDependency,PlanBlocker,PlanningMetadata,PlanningOverrides,
     PlanningTrace,PlannerDecision,PlanStatus,ReproductionExecutionPlan,ReproductionPolicy,UnresolvedPlanItem,
@@ -207,4 +214,9 @@ __all__ = [
     "MetricComparisonPolicy","MetricComparisonStatus","MetricIdentity","ReproductionComparisonReport",
     "AuthoritativePlanningSnapshot","PersistedComparisonReport","PersistedFinalResult",
     "ReproductionJob","ReproductionJobStatus","ResultValidationStatus",
+    "AdaptedExecutionConfig","GPUDevice","GPUDeviceState","GPULease","GPURequirement",
+    "GPURequestStatus","GPUSchedulingRequest","MultiGPUSemantics","PrecisionMode",
+    "RepositoryResourceCapabilities","ResourceAdaptationDecision",
+    "ResourceAdaptationOutcome","ResourceAdaptationReason","ResourceAdaptationRecord",
+    "ResourceAdaptationRequest","SemanticImpact",
 ]

@@ -7,6 +7,10 @@ from .orchestrator import ReproductionOrchestrator, WorkspaceCleanupError
 from .worker import (
     DurableJobCancellationPort,ReproductionWorker,WorkerDisposition,WorkerResult,
 )
+from .resource_adaptation import (
+    OOMAdaptationCoordinator,ResourceExecutionProfile,
+    ResourceExecutionProfileProvider,ResourceWaitRequired,
+)
 from .patching import PatchCoordinator
 from .ports import (
     CancellationPort,
@@ -32,6 +36,8 @@ __all__ = [
     "PatchCoordinator",
     "ReproductionOrchestrator",
     "DurableJobCancellationPort","ReproductionWorker","WorkerDisposition","WorkerResult",
+    "OOMAdaptationCoordinator","ResourceExecutionProfile",
+    "ResourceExecutionProfileProvider","ResourceWaitRequired",
     "ReproductionRunRepository",
     "RetryPolicy",
     "RunStateMachine",

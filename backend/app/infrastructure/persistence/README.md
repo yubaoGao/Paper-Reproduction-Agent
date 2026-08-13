@@ -33,3 +33,10 @@ atomically returned to `QUEUED`, while cancellation requests remain durable.
 The application worker lives in `backend.app.orchestration.worker` and delegates
 execution/resume to `ReproductionOrchestrator`; it does not invoke Docker or a
 runtime directly.
+
+## GPU scheduling
+
+Migration `20260813_03` adds GPU inventory, scheduling-request, and lease tables.
+Allocation locks waiting requests and available device rows in one transaction,
+supports bounded backfilling with aging reservation, and recovers expired leases.
+GPU binaries and runtime state are not stored in PostgreSQL.

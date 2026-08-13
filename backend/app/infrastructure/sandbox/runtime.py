@@ -5,6 +5,7 @@ from __future__ import annotations
 from threading import RLock
 
 from .models import (
+    AssignedDeviceSet,
     MountCategory,
     RegisteredResource,
     ResourceKind,
@@ -57,6 +58,7 @@ class SandboxRuntimeService:
         session_registry,
         provisioner,
         provisioning_network_resource_id: str | None = None,
+        gpu_lease_provider=None,
     ) -> None:
         self.manager = manager
         self.environment_broker = environment_broker
@@ -64,6 +66,7 @@ class SandboxRuntimeService:
         self.session_registry = session_registry
         self.provisioner = provisioner
         self.provisioning_network_resource_id = provisioning_network_resource_id
+        self.gpu_lease_provider = gpu_lease_provider
 
     def prepare(self, context):
         if not context.repository_snapshot_id:
@@ -180,6 +183,7 @@ class SandboxRuntimeService:
             execution_mounts,
             SandboxNetworkPolicy.OFFLINE,
             None,
+            devices=self._execution_devices(context),
         )
         try:
             handle = self.manager.create(execution_spec, plan)
@@ -240,8 +244,23 @@ class SandboxRuntimeService:
             raise
         return mounts
 
+    def _execution_devices(self, context):
+        requirement = context.resource_requirement
+        gpu_required = requirement.gpu_required is True or bool(requirement.gpu_count)
+        if not gpu_required:
+            return AssignedDeviceSet()
+        if self.gpu_lease_provider is None:
+            raise RuntimeError("GPU execution requires a scheduler lease provider")
+        step_id = context.step_id or context.experiment_id
+        lease = self.gpu_lease_provider.resolve(context.run_id, step_id)
+        if lease is None:
+            raise RuntimeError("GPU execution has no active scheduler lease")
+        return AssignedDeviceSet.from_lease(
+            lease, run_id=context.run_id, step_id=step_id,
+        )
+
     @staticmethod
-    def _spec(context, image, mounts, network_policy, network_resource_id):
+    def _spec(context, image, mounts, network_policy, network_resource_id, *, devices=None):
         requirement = context.resource_requirement
         limits = SandboxResourceLimits(
             cpu_cores=requirement.cpu_cores or 1.0,
@@ -255,5 +274,6 @@ class SandboxRuntimeService:
             mounts=mounts,
             network_policy=network_policy,
             egress_network_resource_id=network_resource_id,
+            devices=devices or AssignedDeviceSet(),
             limits=limits,
         )

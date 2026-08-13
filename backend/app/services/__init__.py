@@ -33,6 +33,12 @@ from .job_queue import (
     DurableJobQueue,InvalidJobQueueTransition,JobLeaseConflictError,JobLeaseLostError,
     ReproductionExecutor,ReproductionExecutorFactory,
 )
+from .gpu import (
+    ExecutionConfigApplier,GPUAllocationConflictError,GPUInventoryProvider,
+    GPUInventoryUnavailableError,
+    GPULeaseLostError,GPUScheduler,ResourceAdaptationAgent,
+    MultiGPUSemanticsAnalyzer,WorkerGPUResourcePort,
+)
 
 __all__ = [
     "CompositePaperParser",
@@ -60,4 +66,9 @@ __all__ = [
     "ReproductionJobRepository",
     "DurableJobQueue","InvalidJobQueueTransition","JobLeaseConflictError","JobLeaseLostError",
     "ReproductionExecutor","ReproductionExecutorFactory",
+    "ExecutionConfigApplier","GPUAllocationConflictError","GPUInventoryProvider",
+    "GPUInventoryUnavailableError",
+    "GPULeaseLostError","GPUScheduler","ResourceAdaptationAgent",
+    "WorkerGPUResourcePort",
+    "MultiGPUSemanticsAnalyzer",
 ]

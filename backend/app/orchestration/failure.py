@@ -38,6 +38,26 @@ class FailureClassifier:
                 retryable=False,
             )
         text = f"{result.stderr or ''}\n{result.stdout or ''}".casefold()
+        gpu_oom = any(
+            marker in text
+            for marker in (
+                "cuda out of memory",
+                "gpu out of memory",
+                "hip out of memory",
+                "cudnn_status_alloc_failed",
+                "outofmemoryerror",
+            )
+        )
+        if gpu_oom:
+            return self.record(
+                step_id,
+                attempt_number,
+                FailureCategory.RESOURCE,
+                "GPU_OOM",
+                "GPU memory was exhausted during experiment execution",
+                retryable=True,
+                details={"exit_code": result.exit_code, "stderr_reference": result.stderr_reference},
+            )
         category = next(
             (category for category, patterns in _PATTERNS if any(item in text for item in patterns)),
             FailureCategory.UNKNOWN,

@@ -252,6 +252,7 @@ class LinuxSandboxManager:
             resource_limits=spec.limits,
             network_policy=spec.network_policy,
             gpu_device_ids=spec.devices.gpu_device_ids,
+            gpu_lease_token=spec.devices.gpu_lease_token,
             security_options=spec.security_options,
             started_at=datetime.now(timezone.utc),
         )

@@ -60,6 +60,7 @@ class PlanStepContextFactory:
             mode=ReproductionExecutionMode.REPRODUCTION,
             run_id=runtime_run_id,
             experiment_id=experiment.id,
+            step_id=action.action_id if action is not None else experiment.id,
             objective=experiment.description,
             repository_uri=experiment.repository.uri,
             repository_revision=plan.resolved_commit_sha,

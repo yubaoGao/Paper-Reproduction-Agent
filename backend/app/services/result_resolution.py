@@ -6,7 +6,7 @@ import hashlib
 import statistics
 from typing import Protocol, runtime_checkable
 
-from pydantic import Field
+from pydantic import Field, JsonValue
 
 from backend.app.domain.experiment import (
     Artifact,
@@ -32,7 +32,7 @@ class ResultResolutionRequest(DomainModel):
     artifacts: tuple[Artifact, ...] = ()
     stdout_reference: NonEmptyStr | None = None
     stderr_reference: NonEmptyStr | None = None
-    provenance: dict[NonEmptyStr, str] = Field(default_factory=dict)
+    provenance: dict[NonEmptyStr, JsonValue] = Field(default_factory=dict)
 
 
 @runtime_checkable
@@ -76,7 +76,7 @@ def aggregate_final_result(
     policy: EvaluationPolicy,
     runs: tuple[RunFinalResult, ...],
     *,
-    provenance: dict[str, str] | None = None,
+    provenance: dict[str, JsonValue] | None = None,
 ) -> FinalResult:
     """Aggregate all runs in policy order; best-seed selection is not representable."""
 

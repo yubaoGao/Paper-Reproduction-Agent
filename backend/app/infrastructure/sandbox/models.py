@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 from pydantic import Field, JsonValue, model_validator
 
-from backend.app.domain.experiment import DomainModel, NonEmptyStr
+from backend.app.domain.experiment import DomainModel, NonEmptyStr, _require_aware
 
 
 class EnvironmentRegistrationMode(str, Enum):
@@ -149,6 +149,8 @@ class SandboxEnvironmentPlan(DomainModel):
 
 class AssignedDeviceSet(DomainModel):
     gpu_device_ids: tuple[NonEmptyStr, ...] = ()
+    gpu_lease_token: NonEmptyStr | None = None
+    gpu_lease_expires_at: datetime | None = None
 
     @model_validator(mode="after")
     def explicitly_assigned_only(self):
@@ -157,7 +159,25 @@ class AssignedDeviceSet(DomainModel):
             raise ValueError("all-GPU device requests are forbidden")
         if len(set(self.gpu_device_ids)) != len(self.gpu_device_ids):
             raise ValueError("GPU device IDs must be unique")
+        if self.gpu_device_ids and (self.gpu_lease_token is None or self.gpu_lease_expires_at is None):
+            raise ValueError("GPU device IDs must come from an explicit GPU lease")
+        if not self.gpu_device_ids and (self.gpu_lease_token is not None or self.gpu_lease_expires_at is not None):
+            raise ValueError("GPU lease metadata requires allocated device IDs")
+        if self.gpu_lease_expires_at is not None:
+            _require_aware(self.gpu_lease_expires_at, "gpu_lease_expires_at")
         return self
+
+    @classmethod
+    def from_lease(cls, lease, *, run_id: str, step_id: str):
+        if lease.run_id != run_id or lease.step_id != step_id:
+            raise ValueError("GPU lease owner does not match the sandbox execution step")
+        if lease.expires_at <= datetime.now(timezone.utc):
+            raise ValueError("expired GPU lease cannot be passed to the sandbox runtime")
+        return cls(
+            gpu_device_ids=lease.allocated_gpu_ids,
+            gpu_lease_token=lease.lease_token,
+            gpu_lease_expires_at=lease.expires_at,
+        )
 
 
 class SandboxResourceLimits(DomainModel):
@@ -261,6 +281,7 @@ class SandboxAuditRecord(DomainModel):
     resource_limits: SandboxResourceLimits
     network_policy: SandboxNetworkPolicy
     gpu_device_ids: tuple[NonEmptyStr, ...] = ()
+    gpu_lease_token: NonEmptyStr | None = None
     security_options: tuple[NonEmptyStr, ...]
     started_at: datetime
     finished_at: datetime | None = None

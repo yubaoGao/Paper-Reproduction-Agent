@@ -378,8 +378,15 @@ class PostgresPersistenceUnitOfWork:
 class PostgresPersistence:
     """Repository bundle; construct again with the same database to recover state."""
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(self, session_factory: sessionmaker[Session], *, gpu_inventory_provider=None) -> None:
         from .job_queue import PostgresDurableJobQueue
+        from .gpu_scheduler import (
+            PostgresGPUAwareJobQueue,PostgresGPUScheduler,
+            PostgresGPUWorkerResourcePort,
+        )
+        if gpu_inventory_provider is None:
+            from backend.app.infrastructure.gpu import NvidiaSMIInventoryProvider
+            gpu_inventory_provider = NvidiaSMIInventoryProvider()
 
         self.session_factory = session_factory
         self.jobs = PostgresReproductionJobRepository(session_factory)
@@ -388,6 +395,13 @@ class PostgresPersistence:
         self.final_results = PostgresFinalResultRepository(session_factory)
         self.comparisons = PostgresComparisonReportRepository(session_factory)
         self.queue = PostgresDurableJobQueue(session_factory)
+        self.gpu_scheduler = PostgresGPUScheduler(
+            session_factory, inventory_provider=gpu_inventory_provider,
+        )
+        self.gpu_queue = PostgresGPUAwareJobQueue(self.gpu_scheduler, self.queue)
+        self.gpu_resources = PostgresGPUWorkerResourcePort(
+            self.gpu_scheduler, self.queue,
+        )
 
     def transaction(self) -> PostgresPersistenceUnitOfWork:
         return PostgresPersistenceUnitOfWork(self.session_factory)

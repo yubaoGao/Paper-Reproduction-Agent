@@ -66,6 +66,7 @@ class CurieExecutionContext(DomainModel):
     mode: ReproductionExecutionMode = ReproductionExecutionMode.REPRODUCTION
     run_id: NonEmptyStr
     experiment_id: NonEmptyStr
+    step_id: NonEmptyStr | None = None
     objective: NonEmptyStr
     repository_uri: NonEmptyStr
     repository_revision: NonEmptyStr | None = None
@@ -140,12 +141,19 @@ class CodingRequest(DomainModel):
     locked_constraint_keys: tuple[NonEmptyStr, ...]
 
 
+class CodingValidationResult(DomainModel):
+    name: NonEmptyStr
+    passed: bool
+    details: dict[NonEmptyStr, JsonValue] = Field(default_factory=dict)
+
+
 class CodingResult(DomainModel):
     patch_id: NonEmptyStr
     summary: NonEmptyStr
     changed_categories: tuple[NonEmptyStr, ...] = ()
     proposed_values: dict[NonEmptyStr, JsonValue] = Field(default_factory=dict)
     artifact: Artifact | None = None
+    validations: tuple[CodingValidationResult, ...] = ()
 
 
 class CuriePlanRecord(DomainModel):

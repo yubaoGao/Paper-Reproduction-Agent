@@ -152,3 +152,60 @@ class ComparisonReportRow(PersistenceBase):
     report_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class GPUDeviceRow(PersistenceBase):
+    __tablename__ = "gpu_devices"
+
+    gpu_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    total_memory_mb: Mapped[int] = mapped_column(Integer, nullable=False)
+    available_memory_mb: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    model_name: Mapped[str | None] = mapped_column(Text)
+    evidence_json: Mapped[list] = mapped_column(JSONB, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    active_lease_token: Mapped[str | None] = mapped_column(String(64), index=True)
+
+
+class GPUSchedulingRequestRow(PersistenceBase):
+    __tablename__ = "gpu_scheduling_requests"
+    __table_args__ = (
+        Index("ix_gpu_requests_wait_order", "status", "queued_at", "request_id"),
+        UniqueConstraint("job_id", "run_id", "step_id", name="uq_gpu_request_owner"),
+    )
+
+    request_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    job_id: Mapped[str] = mapped_column(
+        ForeignKey("reproduction_jobs.job_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    run_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    step_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    minimum_gpu_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    preferred_gpu_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    estimated_memory_mb: Mapped[int | None] = mapped_column(Integer)
+    queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    skip_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    active_lease_token: Mapped[str | None] = mapped_column(String(64), index=True)
+    request_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+
+class GPULeaseRow(PersistenceBase):
+    __tablename__ = "gpu_leases"
+
+    lease_token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    request_id: Mapped[str] = mapped_column(
+        ForeignKey("gpu_scheduling_requests.request_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    job_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    step_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    worker_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    allocated_gpu_ids_json: Mapped[list] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

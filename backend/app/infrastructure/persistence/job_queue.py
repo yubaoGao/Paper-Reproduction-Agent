@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.app.domain import ReproductionJob, ReproductionJobStatus
@@ -15,7 +15,7 @@ from backend.app.services.job_queue import (
 )
 from backend.app.services.persistence import PersistenceEntityNotFoundError
 
-from .models import ReproductionJobRow
+from .models import GPUSchedulingRequestRow, ReproductionJobRow
 from .repositories import _Repository, _job_from_row, _job_values, utc_now
 
 
@@ -98,26 +98,113 @@ class PostgresDurableJobQueue(_Repository):
             )
             if row is None:
                 return None
-            job = self._job(row)
-            status = (
-                ReproductionJobStatus.CANCEL_REQUESTED
-                if job.status is ReproductionJobStatus.CANCEL_REQUESTED
-                else ReproductionJobStatus.CLAIMED
-            )
-            claimed = _copy_job(
-                job,
-                status=status,
-                worker_id=worker_id,
-                lease_token=uuid.uuid4().hex,
-                claimed_at=current_time,
-                heartbeat_at=current_time,
-                lease_expires_at=current_time + timedelta(seconds=lease_seconds),
-                claim_count=job.claim_count + 1,
-                updated_at=current_time,
-            )
-            self._store(row, claimed)
+            claimed = self._claim_row(row, worker_id, lease_seconds, current_time)
             session.flush()
             return claimed
+
+    def claim_job(self, job_id, worker_id, *, lease_seconds, now=None):
+        self._validate_lease_seconds(lease_seconds)
+        if not worker_id.strip():
+            raise ValueError("worker_id cannot be empty")
+        current_time = now or utc_now()
+        with self._write() as session:
+            self._recover_locked(session, current_time)
+            row = session.scalar(
+                select(ReproductionJobRow)
+                .where(
+                    ReproductionJobRow.job_id == job_id,
+                    ReproductionJobRow.status.in_(
+                        (ReproductionJobStatus.QUEUED.value, ReproductionJobStatus.CANCEL_REQUESTED.value)
+                    ),
+                    ReproductionJobRow.lease_token.is_(None),
+                )
+                .with_for_update(skip_locked=True)
+            )
+            if row is None:
+                return None
+            claimed = self._claim_row(row, worker_id, lease_seconds, current_time)
+            session.flush()
+            return claimed
+
+    def claim_cancel_requested(self, worker_id, *, lease_seconds, now=None):
+        """Cancellation is claimable without waiting for scarce execution resources."""
+        self._validate_lease_seconds(lease_seconds)
+        if not worker_id.strip():
+            raise ValueError("worker_id cannot be empty")
+        current_time = now or utc_now()
+        with self._write() as session:
+            self._recover_locked(session, current_time)
+            row = session.scalar(
+                select(ReproductionJobRow)
+                .where(
+                    ReproductionJobRow.status == ReproductionJobStatus.CANCEL_REQUESTED.value,
+                    ReproductionJobRow.lease_token.is_(None),
+                )
+                .order_by(ReproductionJobRow.enqueued_at, ReproductionJobRow.job_id)
+                .limit(1)
+                .with_for_update(skip_locked=True)
+            )
+            if row is None:
+                return None
+            claimed = self._claim_row(row, worker_id, lease_seconds, current_time)
+            session.flush()
+            return claimed
+
+    def claim_without_gpu_request(self, worker_id, *, lease_seconds, now=None):
+        """Claim a CPU-only job without bypassing a waiting GPU request."""
+        self._validate_lease_seconds(lease_seconds)
+        if not worker_id.strip():
+            raise ValueError("worker_id cannot be empty")
+        current_time = now or utc_now()
+        with self._write() as session:
+            self._recover_locked(session, current_time)
+            gpu_request = exists(
+                select(GPUSchedulingRequestRow.request_id).where(
+                    GPUSchedulingRequestRow.job_id == ReproductionJobRow.job_id,
+                    GPUSchedulingRequestRow.status.in_(("waiting", "leased")),
+                )
+            )
+            row = session.scalar(
+                select(ReproductionJobRow)
+                .where(
+                    ReproductionJobRow.status == ReproductionJobStatus.QUEUED.value,
+                    ReproductionJobRow.lease_token.is_(None),
+                    ~gpu_request,
+                )
+                .order_by(
+                    ReproductionJobRow.enqueued_at,
+                    ReproductionJobRow.created_at,
+                    ReproductionJobRow.job_id,
+                )
+                .limit(1)
+                .with_for_update(skip_locked=True)
+            )
+            if row is None:
+                return None
+            claimed = self._claim_row(row, worker_id, lease_seconds, current_time)
+            session.flush()
+            return claimed
+
+    def _claim_row(self, row, worker_id, lease_seconds, current_time):
+        job = self._job(row)
+        status = (
+            ReproductionJobStatus.CANCEL_REQUESTED
+            if job.status is ReproductionJobStatus.CANCEL_REQUESTED
+            else ReproductionJobStatus.CLAIMED
+        )
+        claimed = _copy_job(
+            job,
+            status=status,
+            worker_id=worker_id,
+            lease_token=uuid.uuid4().hex,
+            claimed_at=current_time,
+            heartbeat_at=current_time,
+            lease_expires_at=current_time + timedelta(seconds=lease_seconds),
+            claim_count=job.claim_count + 1,
+            updated_at=current_time,
+        )
+        self._store(row, claimed)
+        return claimed
 
     def mark_running(
         self,
@@ -165,6 +252,34 @@ class PostgresDurableJobQueue(_Repository):
             self._store(row, renewed)
             session.flush()
             return renewed
+
+    def defer(
+        self,
+        job_id: str,
+        worker_id: str,
+        lease_token: str,
+        *,
+        now: datetime | None = None,
+    ) -> ReproductionJob:
+        """Return an owned resource-waiting job to the durable FIFO queue."""
+        current_time = now or utc_now()
+        with self._write() as session:
+            row = self._locked_row(session, job_id)
+            job = self._require_lease(row, worker_id, lease_token, current_time)
+            deferred = _copy_job(
+                job,
+                status=ReproductionJobStatus.QUEUED,
+                enqueued_at=current_time,
+                worker_id=None,
+                lease_token=None,
+                claimed_at=None,
+                lease_expires_at=None,
+                heartbeat_at=None,
+                updated_at=current_time,
+            )
+            self._store(row, deferred)
+            session.flush()
+            return deferred
 
     def request_cancel(self, job_id: str, *, now: datetime | None = None) -> ReproductionJob:
         current_time = now or utc_now()

@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from enum import Enum
 
 from backend.app.domain import ReproductionJob, ReproductionJobStatus, RunStatus
+from backend.app.services.gpu import GPULeaseLostError
 from backend.app.services.job_queue import JobLeaseLostError
+from .resource_adaptation import ResourceWaitRequired
 
 
 class WorkerDisposition(str, Enum):
@@ -15,6 +17,7 @@ class WorkerDisposition(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     LEASE_LOST = "lease_lost"
+    WAITING_FOR_RESOURCES = "waiting_for_resources"
 
 
 @dataclass(frozen=True)
@@ -100,6 +103,7 @@ class ReproductionWorker:
         cleanup_port=None,
         lease_seconds: int = 60,
         heartbeat_interval_seconds: float | None = None,
+        gpu_resource_port=None,
     ) -> None:
         if not worker_id.strip():
             raise ValueError("worker_id cannot be empty")
@@ -118,6 +122,7 @@ class ReproductionWorker:
         self.cleanup_port = cleanup_port
         self.lease_seconds = lease_seconds
         self.heartbeat_interval_seconds = interval
+        self.gpu_resource_port = gpu_resource_port
 
     def run_once(self) -> WorkerResult | None:
         job = self.queue.claim(self.worker_id, lease_seconds=self.lease_seconds)
@@ -137,14 +142,20 @@ class ReproductionWorker:
                     run_id = self._cancel(job, cancellation)
                     self._assert_lease(cancellation)
                     self.queue.cancel(job.job_id, job.worker_id, job.lease_token)
-                    return WorkerResult(job.job_id, WorkerDisposition.CANCELLED, run_id)
+                    warning = self._release_gpu_resources(job)
+                    return WorkerResult(
+                        job.job_id, WorkerDisposition.CANCELLED, run_id, warning,
+                    )
 
                 running = self.queue.mark_running(job.job_id, job.worker_id, job.lease_token)
                 if running.status is ReproductionJobStatus.CANCEL_REQUESTED:
                     run_id = self._cancel(running, cancellation)
                     self._assert_lease(cancellation)
                     self.queue.cancel(job.job_id, job.worker_id, job.lease_token)
-                    return WorkerResult(job.job_id, WorkerDisposition.CANCELLED, run_id)
+                    warning = self._release_gpu_resources(job)
+                    return WorkerResult(
+                        job.job_id, WorkerDisposition.CANCELLED, run_id, warning,
+                    )
 
                 snapshot = self.planning_snapshots.get_by_job(job.job_id)
                 existing = self.runs.list_by_job(job.job_id)
@@ -162,7 +173,28 @@ class ReproductionWorker:
                     run = executor.execute(snapshot.execution_plan, run_id)
                 self._assert_lease(cancellation)
                 return self._finish(job, run)
-        except JobLeaseLostError as exc:
+        except ResourceWaitRequired as exc:
+            if self.gpu_resource_port is None:
+                message = "GPU resource wait was requested without a worker resource port"
+                self.queue.fail(job.job_id, job.worker_id, job.lease_token, message)
+                return WorkerResult(job.job_id, WorkerDisposition.FAILED, run_id, message)
+            try:
+                self._assert_lease(cancellation)
+                self.gpu_resource_port.defer(
+                    job.job_id,
+                    exc.step_id,
+                    job.worker_id,
+                    job.lease_token,
+                    exc.requirement,
+                )
+            except (JobLeaseLostError, GPULeaseLostError) as lease_exc:
+                return WorkerResult(
+                    job.job_id, WorkerDisposition.LEASE_LOST, run_id, str(lease_exc),
+                )
+            return WorkerResult(
+                job.job_id, WorkerDisposition.WAITING_FOR_RESOURCES, run_id, str(exc),
+            )
+        except (JobLeaseLostError, GPULeaseLostError) as exc:
             return WorkerResult(job.job_id, WorkerDisposition.LEASE_LOST, run_id, str(exc))
         except Exception as exc:
             if cancellation.lease_lost:
@@ -170,7 +202,8 @@ class ReproductionWorker:
             message = f"{type(exc).__name__}: {exc}"
             try:
                 self.queue.fail(job.job_id, job.worker_id, job.lease_token, message)
-            except JobLeaseLostError:
+                self._release_gpu_resources(job)
+            except (JobLeaseLostError, GPULeaseLostError):
                 return WorkerResult(job.job_id, WorkerDisposition.LEASE_LOST, run_id, message)
             return WorkerResult(job.job_id, WorkerDisposition.FAILED, run_id, message)
 
@@ -188,14 +221,33 @@ class ReproductionWorker:
     def _finish(self, job, run) -> WorkerResult:
         if run.status is RunStatus.SUCCEEDED:
             self.queue.succeed(job.job_id, job.worker_id, job.lease_token)
-            return WorkerResult(job.job_id, WorkerDisposition.SUCCEEDED, run.run_id)
+            warning = self._release_gpu_resources(job)
+            return WorkerResult(
+                job.job_id, WorkerDisposition.SUCCEEDED, run.run_id, warning,
+            )
         if run.status is RunStatus.CANCELLED:
             self._cleanup(run)
             self.queue.cancel(job.job_id, job.worker_id, job.lease_token)
-            return WorkerResult(job.job_id, WorkerDisposition.CANCELLED, run.run_id)
+            warning = self._release_gpu_resources(job)
+            return WorkerResult(
+                job.job_id, WorkerDisposition.CANCELLED, run.run_id, warning,
+            )
         message = run.failure.message if run.failure is not None else "reproduction run failed"
         self.queue.fail(job.job_id, job.worker_id, job.lease_token, message)
+        warning = self._release_gpu_resources(job)
+        if warning is not None:
+            message = f"{message}; {warning}"
         return WorkerResult(job.job_id, WorkerDisposition.FAILED, run.run_id, message)
+
+    def _release_gpu_resources(self, job):
+        if self.gpu_resource_port is not None:
+            try:
+                self.gpu_resource_port.release_job(job.job_id, job.worker_id)
+            except Exception as exc:
+                # The durable terminal state is already committed. Reconciliation
+                # releases any surviving lease without letting an old owner write.
+                return f"GPU cleanup deferred to reconciliation: {exc}"
+        return None
 
     def _cancel(self, job, cancellation) -> str | None:
         existing = self.runs.list_by_job(job.job_id)
