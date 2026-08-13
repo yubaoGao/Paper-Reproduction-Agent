@@ -100,6 +100,10 @@ from .comparison import (
     MetricComparisonPolicy, MetricComparisonStatus, MetricIdentity,
     ReproductionComparisonReport,
 )
+from .persistence import (
+    AuthoritativePlanningSnapshot, PersistedComparisonReport, PersistedFinalResult,
+    ReproductionJob, ReproductionJobStatus, ResultValidationStatus,
+)
 from .planner import (
     BlockerSeverity,DecisionSource,ExperimentDependency,PlanBlocker,PlanningMetadata,PlanningOverrides,
     PlanningTrace,PlannerDecision,PlanStatus,ReproductionExecutionPlan,ReproductionPolicy,UnresolvedPlanItem,
@@ -201,4 +205,6 @@ __all__ = [
     "ComparisonEvidenceChain","ComparisonPolicyKind","ExecutionFailureReference",
     "ExperimentComparison","ExperimentComparisonStatus","MetricComparison",
     "MetricComparisonPolicy","MetricComparisonStatus","MetricIdentity","ReproductionComparisonReport",
+    "AuthoritativePlanningSnapshot","PersistedComparisonReport","PersistedFinalResult",
+    "ReproductionJob","ReproductionJobStatus","ResultValidationStatus",
 ]

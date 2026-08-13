@@ -31,6 +31,10 @@ class ReproductionRunRepository(Protocol):
 
     def get(self, run_id: str) -> ReproductionRun: ...
 
+    def list_by_job(self, job_id: str) -> tuple[ReproductionRun, ...]: ...
+
+    def list_by_status(self, status: str) -> tuple[ReproductionRun, ...]: ...
+
 
 @runtime_checkable
 class CancellationPort(Protocol):

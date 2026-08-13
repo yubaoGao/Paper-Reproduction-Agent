@@ -1,3 +1,4 @@
 # Infrastructure
 
-未来承载 Database、Queue、Artifact Storage 与 Docker adapter。当前为空边界，不包含 PostgreSQL、Redis、Celery 或 sandbox 实现。
+当前包含 production PostgreSQL persistence、paper/repository ingestion 和 sandbox adapters。
+PostgreSQL schema 由 Alembic migration 管理；Redis、Celery、queue worker 与 GPU scheduler 仍未实现。

@@ -24,6 +24,11 @@ from .planning import PlanningSettings,PlanningValidationError,ReproductionPlann
 from .reproduction_intake import ReproductionIntakeError,ReproductionIntakeService
 from .result_resolution import CanonicalResultResolver,RepositoryResultAdapter,ResultResolutionRequest,ResultResolver,aggregate_final_result
 from .result_comparison import DeterministicResultComparator,MetricIdentityNormalizer
+from .persistence import (
+    ComparisonReportRepository,FinalResultRepository,PersistenceConflictError,
+    PersistenceEntityNotFoundError,PersistenceUnitOfWork,PlanningSnapshotRepository,
+    ReproductionJobRepository,
+)
 
 __all__ = [
     "CompositePaperParser",
@@ -46,4 +51,7 @@ __all__ = [
     "ReproductionIntakeError","ReproductionIntakeService",
     "CanonicalResultResolver","RepositoryResultAdapter","ResultResolutionRequest","ResultResolver","aggregate_final_result",
     "DeterministicResultComparator","MetricIdentityNormalizer",
+    "ComparisonReportRepository","FinalResultRepository","PersistenceConflictError",
+    "PersistenceEntityNotFoundError","PersistenceUnitOfWork","PlanningSnapshotRepository",
+    "ReproductionJobRepository",
 ]
