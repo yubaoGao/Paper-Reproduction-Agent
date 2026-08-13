@@ -1,7 +1,7 @@
 """Internal, bounded schemas for repository analysis."""
 from __future__ import annotations
 from pydantic import BaseModel,ConfigDict
-from backend.app.domain import EvidenceReference,RepositoryAnalysisCatalog,RepositoryAnalysisTrace,RepositoryComponentRecord,RepositoryConflict,RepositoryEvaluationPolicyRecord,RepositoryExperimentImplementation,RepositoryFact
+from backend.app.domain import EvidenceReference,RepositoryAnalysisCatalog,RepositoryAnalysisTrace,RepositoryComponentRecord,RepositoryConflict,RepositoryEvaluationPolicyRecord,RepositoryExperimentImplementation,RepositoryFact,RepositorySnapshot
 from backend.app.llm import LLMCallMetadata
 
 class RepositoryContextItem(BaseModel):
@@ -17,7 +17,7 @@ class RepositoryStageExtraction(BaseModel):
 class RepositoryCatalogReview(BaseModel): valid:bool; missing_components:tuple[str,...]=(); warnings:tuple[str,...]=()
 class RepositoryAnalysisResult(BaseModel):
     model_config=ConfigDict(extra="forbid",frozen=True)
-    catalog:RepositoryAnalysisCatalog; trace:RepositoryAnalysisTrace
+    catalog:RepositoryAnalysisCatalog; trace:RepositoryAnalysisTrace; snapshot:RepositorySnapshot
 class PromptSpec(BaseModel):
     model_config=ConfigDict(extra="forbid",frozen=True)
     name:str; version:str; system:str; task:str

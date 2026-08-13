@@ -45,6 +45,21 @@ class RepositoryResultAdapter(Protocol):
     ) -> tuple[RunFinalResult, ...]: ...
 
 
+class RepositoryResultAdapterRegistry:
+    """Explicit repository-specific adapter routing; unknown repositories fail closed."""
+
+    def __init__(self, adapters: dict[str, RepositoryResultAdapter] | None = None) -> None:
+        self._adapters = dict(adapters or {})
+
+    def resolve_runs(self, request: ResultResolutionRequest):
+        adapter = self._adapters.get(request.repository_id)
+        if adapter is None:
+            raise ValueError(
+                f"repository {request.repository_id!r} has no registered result adapter"
+            )
+        return adapter.resolve_runs(request)
+
+
 @runtime_checkable
 class ResultResolver(Protocol):
     def resolve(self, request: ResultResolutionRequest) -> FinalResult: ...

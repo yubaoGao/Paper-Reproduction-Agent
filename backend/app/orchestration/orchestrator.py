@@ -23,6 +23,7 @@ from backend.app.domain import (
     ResourceAdaptationOutcome,
     PatchStatus,
     ReproductionExecutionPlan,
+    ReproductionEventType,
     ReproductionRun,
     RunStatus,
     StepStatus,
@@ -76,6 +77,8 @@ class ReproductionOrchestrator:
         result_resolver=None,
         resource_adaptation_port=None,
         external_resource_reference_provider=None,
+        product_event_publisher=None,
+        job_id=None,
     ) -> None:
         self.repository = repository
         self.command_port = command_port
@@ -90,6 +93,8 @@ class ReproductionOrchestrator:
         self.result_resolver = result_resolver
         self.resource_adaptation_port = resource_adaptation_port
         self.external_resource_reference_provider = external_resource_reference_provider
+        self.product_event_publisher = product_event_publisher
+        self.job_id = job_id
         self.state_machine = RunStateMachine()
         self.dispatcher = ExecutionDispatcher(self.state_machine)
         self.patch_coordinator = (
@@ -182,6 +187,58 @@ class ReproductionOrchestrator:
             external_resources=self._external_resources(experiment),
         )
         run = self._transition_step(run, step_id, StepStatus.PREPARING)
+        first_attempt = len(step_record.attempts) + 1
+        pending_allocation_adaptation = None
+        pending_allocation_patch = None
+        gpu_required = (
+            context.resource_requirement.gpu_required is True
+            or bool(context.resource_requirement.gpu_count)
+        )
+        if self.resource_adaptation_port is not None and gpu_required:
+            pending_allocation_adaptation, pending_allocation_patch = (
+                self.resource_adaptation_port.prepare_for_allocation(
+                    context,
+                    orchestration_run_id=run.run_id,
+                    attempts=self.state_machine.step(run, step_id).attempts,
+                )
+            )
+            if (
+                pending_allocation_adaptation is not None
+                and pending_allocation_adaptation.outcome
+                is ResourceAdaptationOutcome.WAITING_FOR_RESOURCES
+            ):
+                raise ResourceWaitRequired(
+                    pending_allocation_adaptation.updated_requirement,
+                    step_id,
+                    pending_allocation_adaptation.reason,
+                )
+            if (
+                pending_allocation_adaptation is not None
+                and pending_allocation_adaptation.outcome
+                not in {
+                    ResourceAdaptationOutcome.RETRY,
+                    ResourceAdaptationOutcome.PATCH_AND_RETRY,
+                }
+            ):
+                failure = self.classifier.record(
+                    step_id, first_attempt, FailureCategory.RESOURCE,
+                    "RESOURCE_ADAPTATION_BLOCKED",
+                    pending_allocation_adaptation.reason,
+                    retryable=False,
+                )
+                attempt = self._exception_attempt(context, first_attempt, failure)
+                attempt = attempt.model_copy(update={
+                    "patches": tuple(
+                        patch for patch in (pending_allocation_patch,) if patch is not None
+                    ),
+                    "resource_adaptations": tuple(
+                        item.record for item in (pending_allocation_adaptation,)
+                        if item is not None and item.record is not None
+                    ),
+                })
+                self.resource_adaptation_port.clear_pending(context)
+                run = self._append_attempt(run, step_id, attempt)
+                return self._transition_step(run, step_id, StepStatus.FAILED, failure=failure)
         try:
             workspace = self.workspace_port.prepare(context)
         except Exception as exc:
@@ -222,54 +279,6 @@ class ReproductionOrchestrator:
             run = self._transition_step(run, step_id, StepStatus.RUNNING)
             final_result = None
             final_validations = ()
-            first_attempt = len(step_record.attempts) + 1
-            pending_allocation_adaptation = None
-            pending_allocation_patch = None
-            if self.resource_adaptation_port is not None:
-                pending_allocation_adaptation, pending_allocation_patch = self.resource_adaptation_port.prepare_for_allocation(
-                    context,
-                    orchestration_run_id=run.run_id,
-                    attempts=self.state_machine.step(run, step_id).attempts,
-                )
-                if (
-                    pending_allocation_adaptation is not None
-                    and pending_allocation_adaptation.outcome
-                    is ResourceAdaptationOutcome.WAITING_FOR_RESOURCES
-                ):
-                    raise ResourceWaitRequired(
-                        pending_allocation_adaptation.updated_requirement,
-                        step_id,
-                        pending_allocation_adaptation.reason,
-                    )
-                if (
-                    pending_allocation_adaptation is not None
-                    and pending_allocation_adaptation.outcome
-                    not in {
-                        ResourceAdaptationOutcome.RETRY,
-                        ResourceAdaptationOutcome.PATCH_AND_RETRY,
-                    }
-                ):
-                    failure = self.classifier.record(
-                        step_id, first_attempt, FailureCategory.RESOURCE,
-                        "RESOURCE_ADAPTATION_BLOCKED",
-                        pending_allocation_adaptation.reason,
-                        retryable=False,
-                    )
-                    attempt = self._exception_attempt(context, first_attempt, failure)
-                    attempt = attempt.model_copy(
-                        update={
-                            "patches": tuple(
-                                patch for patch in (pending_allocation_patch,) if patch is not None
-                            ),
-                            "resource_adaptations": tuple(
-                                item.record for item in (pending_allocation_adaptation,)
-                                if item is not None and item.record is not None
-                            ),
-                        }
-                    )
-                    self.resource_adaptation_port.clear_pending(context)
-                    run = self._append_attempt(run, step_id, attempt)
-                    return self._transition_step(run, step_id, StepStatus.FAILED, failure=failure)
             for attempt_number in range(first_attempt, self._attempt_limit() + 1):
                 if attempt_number > first_attempt:
                     run = self._transition_step(run, step_id, StepStatus.RUNNING)
@@ -413,6 +422,12 @@ class ReproductionOrchestrator:
                     step_id=step_id,
                     attempt_number=attempt_number,
                 )
+                if failure is not None and failure.code == "GPU_OOM":
+                    self._publish(ReproductionEventType.GPU_OOM, {
+                        "step_id": step_id,
+                        "attempt_number": attempt_number,
+                    })
+                self._publish_epoch_progress(result, step_id, attempt_number)
                 if failure is None and not all(item.passed for item in validations):
                     failure = self.classifier.validation_failure(
                         step_id=step_id,
@@ -485,6 +500,23 @@ class ReproductionOrchestrator:
                 if self.resource_adaptation_port is not None:
                     self.resource_adaptation_port.clear_pending(context)
                 run = self._append_attempt(run, step_id, attempt)
+                for patch in attempt.patches:
+                    self._publish(ReproductionEventType.AGENT_PATCH_COMPLETED, {
+                        "step_id": step_id,
+                        "attempt_number": attempt_number,
+                        "patch_id": patch.patch_id,
+                        "status": patch.status.value,
+                    })
+                for record in attempt.resource_adaptations:
+                    self._publish(ReproductionEventType.RESOURCE_ADAPTED, {
+                        "step_id": step_id,
+                        "attempt_number": attempt_number,
+                        "adaptation_id": record.adaptation_id,
+                        "reason": record.reason.value,
+                        "semantic_impact": record.semantic_impact.value,
+                        "effective_batch_before": record.effective_batch_before,
+                        "effective_batch_after": record.effective_batch_after,
+                    })
                 final_result = result
                 final_validations = validations
                 if failure is None:
@@ -511,6 +543,11 @@ class ReproductionOrchestrator:
                         ResourceAdaptationOutcome.PATCH_AND_RETRY,
                     }:
                         run = self._transition_step(run, step_id, StepStatus.RETRYING)
+                        self._publish(ReproductionEventType.STEP_RETRYING, {
+                            "step_id": step_id,
+                            "attempt_number": attempt_number,
+                            "reason": "resource_adaptation",
+                        })
                         continue
                 if not self.retry_policy.allows(failure, attempt_number):
                     break
@@ -518,11 +555,26 @@ class ReproductionOrchestrator:
                     if self.patch_coordinator is None:
                         break
                     run = self._transition_step(run, step_id, StepStatus.PATCHING)
+                    self._publish(ReproductionEventType.AGENT_PATCH_STARTED, {
+                        "step_id": step_id,
+                        "attempt_number": attempt_number,
+                    })
                     patch = self.patch_coordinator.apply(context, failure, attempt_number)
                     run = self._attach_patch(run, step_id, patch)
+                    self._publish(ReproductionEventType.AGENT_PATCH_COMPLETED, {
+                        "step_id": step_id,
+                        "attempt_number": attempt_number,
+                        "patch_id": patch.patch_id,
+                        "status": patch.status.value,
+                    })
                     if patch.status is not PatchStatus.APPLIED:
                         break
                 run = self._transition_step(run, step_id, StepStatus.RETRYING)
+                self._publish(ReproductionEventType.STEP_RETRYING, {
+                    "step_id": step_id,
+                    "attempt_number": attempt_number,
+                    "reason": "bounded_retry_policy",
+                })
 
             step = self.state_machine.step(run, step_id)
             failure = step.attempts[-1].failures[-1]
@@ -891,7 +943,43 @@ class ReproductionOrchestrator:
     def _transition_step(self, run, step_id, target, **changes):
         updated = self.state_machine.transition_step(run, step_id, target, **changes)
         self._save(run, updated)
+        if target is StepStatus.RUNNING:
+            self._publish(ReproductionEventType.STEP_STARTED, {
+                "step_id": step_id,
+                "attempt_number": len(self.state_machine.step(updated, step_id).attempts) + 1,
+            })
+        elif target in {
+            StepStatus.SUCCEEDED, StepStatus.FAILED,
+            StepStatus.BLOCKED, StepStatus.CANCELLED,
+        }:
+            self._publish(ReproductionEventType.STEP_COMPLETED, {
+                "step_id": step_id,
+                "status": target.value,
+                "attempts": len(self.state_machine.step(updated, step_id).attempts),
+            })
         return updated
+
+    def _publish(self, event_type, payload):
+        if self.product_event_publisher is None or self.job_id is None:
+            return
+        try:
+            self.product_event_publisher.publish(self.job_id, event_type, payload)
+        except Exception:
+            # Scientific state remains authoritative if the product-event tail is
+            # temporarily unavailable; recovery can still project persisted state.
+            return
+
+    def _publish_epoch_progress(self, result, step_id, attempt_number):
+        for metric in result.metrics:
+            if metric.name.casefold().replace("-", "_") not in {
+                "epoch", "current_epoch", "completed_epoch",
+            }:
+                continue
+            self._publish(ReproductionEventType.EPOCH_PROGRESS, {
+                "step_id": step_id,
+                "attempt_number": attempt_number,
+                "epoch": metric.value,
+            })
 
     def _save(self, previous, updated):
         self.repository.save(updated, expected_revision=previous.revision)

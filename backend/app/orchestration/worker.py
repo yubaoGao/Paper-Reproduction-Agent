@@ -7,9 +7,11 @@ from dataclasses import dataclass
 from enum import Enum
 
 from backend.app.domain import (
-    ReproductionEventType, ReproductionJob, ReproductionJobStatus, RunStatus,
+    GPUSchedulingRequest, ReproductionEventType, ReproductionJob,
+    ReproductionJobStatus, RunStatus,
+    StepStatus,
 )
-from backend.app.services.gpu import GPULeaseLostError
+from backend.app.services.gpu import GPUAllocationConflictError, GPULeaseLostError
 from backend.app.services.job_queue import JobLeaseLostError
 from .resource_adaptation import ResourceWaitRequired
 
@@ -107,6 +109,8 @@ class ReproductionWorker:
         heartbeat_interval_seconds: float | None = None,
         gpu_resource_port=None,
         product_event_publisher=None,
+        gpu_scheduler=None,
+        result_finalizer=None,
     ) -> None:
         if not worker_id.strip():
             raise ValueError("worker_id cannot be empty")
@@ -127,12 +131,15 @@ class ReproductionWorker:
         self.heartbeat_interval_seconds = interval
         self.gpu_resource_port = gpu_resource_port
         self.product_event_publisher = product_event_publisher
+        self.gpu_scheduler = gpu_scheduler
+        self.result_finalizer = result_finalizer
 
     def run_once(self) -> WorkerResult | None:
         job = self.queue.claim(self.worker_id, lease_seconds=self.lease_seconds)
         if job is None:
             return None
         self._publish(job.job_id, ReproductionEventType.JOB_CLAIMED, {"status": "claimed"})
+        self._publish_gpu_allocations(job.job_id)
         cancellation = DurableJobCancellationPort(self.queue, job)
         run_id: str | None = None
         try:
@@ -191,6 +198,7 @@ class ReproductionWorker:
                 return WorkerResult(job.job_id, WorkerDisposition.FAILED, run_id, message)
             try:
                 self._assert_lease(cancellation)
+                self._ensure_gpu_request(job, run_id, exc)
                 self.gpu_resource_port.defer(
                     job.job_id,
                     exc.step_id,
@@ -210,7 +218,10 @@ class ReproductionWorker:
         except Exception as exc:
             if cancellation.lease_lost:
                 return WorkerResult(job.job_id, WorkerDisposition.LEASE_LOST, run_id, type(exc).__name__)
-            message = f"{type(exc).__name__}: {exc}"
+            # Exception text from repositories, runtimes, and adapters is
+            # untrusted and may contain host paths or secret-bearing command
+            # details. Persist and publish a stable public summary only.
+            message = f"{type(exc).__name__}: worker execution failed"
             try:
                 self.queue.fail(job.job_id, job.worker_id, job.lease_token, message)
                 self._release_gpu_resources(job)
@@ -232,6 +243,9 @@ class ReproductionWorker:
 
     def _finish(self, job, run) -> WorkerResult:
         if run.status is RunStatus.SUCCEEDED:
+            if self.result_finalizer is None:
+                raise RuntimeError("successful execution requires a configured result finalizer")
+            self.result_finalizer.finalize(job, run)
             self.queue.succeed(job.job_id, job.worker_id, job.lease_token)
             warning = self._release_gpu_resources(job)
             self._publish(job.job_id, ReproductionEventType.JOB_SUCCEEDED, {"run_id": run.run_id})
@@ -262,6 +276,50 @@ class ReproductionWorker:
         except Exception:
             # Product event delivery must never steal or corrupt the durable job lease.
             return
+
+    def _publish_gpu_allocations(self, job_id):
+        if self.gpu_scheduler is None:
+            return
+        for lease in self.gpu_scheduler.active_leases_for_job(job_id):
+            self._publish(job_id, ReproductionEventType.GPU_ALLOCATED, {
+                "step_id": lease.step_id,
+                "device_ids": list(lease.allocated_gpu_ids),
+                "gpu_count": len(lease.allocated_gpu_ids),
+            })
+
+    def _ensure_gpu_request(self, job, run_id, wait):
+        if self.gpu_scheduler is None:
+            raise RuntimeError("GPU wait requested without a configured scheduler")
+        if run_id is None:
+            raise RuntimeError("GPU wait occurred before a durable run identity was assigned")
+        persisted_run = self.runs.get(run_id)
+        completed_steps = {
+            step.step_id for step in persisted_run.steps
+            if step.status is StepStatus.SUCCEEDED
+        }
+        for lease in self.gpu_scheduler.active_leases_for_job(job.job_id):
+            if lease.step_id in completed_steps and lease.step_id != wait.step_id:
+                self.gpu_scheduler.complete_step(
+                    job.job_id, lease.step_id, job.worker_id,
+                )
+        runtime_run_id = f"{run_id}:step:{wait.step_id}"
+        request = GPUSchedulingRequest(
+            request_id=f"gpu-request:{job.job_id}:{wait.step_id}",
+            job_id=job.job_id,
+            run_id=runtime_run_id,
+            step_id=wait.step_id,
+            requirement=wait.requirement,
+        )
+        try:
+            self.gpu_scheduler.submit(request)
+        except GPUAllocationConflictError:
+            existing = self.gpu_scheduler.get_request(request.request_id)
+            if (
+                existing.job_id != request.job_id
+                or existing.run_id != request.run_id
+                or existing.step_id != request.step_id
+            ):
+                raise
 
     def _release_gpu_resources(self, job):
         if self.gpu_resource_port is not None:

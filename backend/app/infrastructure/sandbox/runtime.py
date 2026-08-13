@@ -61,6 +61,7 @@ class SandboxRuntimeService:
         provisioning_network_resource_id: str | None = None,
         gpu_lease_provider=None,
         external_resource_binding_provider=None,
+        repository_snapshot_provider=None,
     ) -> None:
         self.manager = manager
         self.environment_broker = environment_broker
@@ -70,10 +71,28 @@ class SandboxRuntimeService:
         self.provisioning_network_resource_id = provisioning_network_resource_id
         self.gpu_lease_provider = gpu_lease_provider
         self.external_resource_binding_provider = external_resource_binding_provider
+        self.repository_snapshot_provider = repository_snapshot_provider
 
     def prepare(self, context):
         if not context.repository_snapshot_id:
             raise ValueError("a registered repository snapshot is required")
+        if self.repository_snapshot_provider is None:
+            raise RuntimeError("repository snapshot persistence is not configured")
+        snapshot = self.repository_snapshot_provider.get(context.repository_snapshot_id)
+        if snapshot.snapshot_id != context.repository_snapshot_id:
+            raise ValueError("repository snapshot identity mismatch")
+        self.resource_registry.register_or_validate(
+            RegisteredResource(
+                resource_id=f"repository:{snapshot.snapshot_id}",
+                kind=ResourceKind.HOST_PATH,
+                category=MountCategory.REPOSITORY_SNAPSHOT_READ_ONLY,
+                host_path=snapshot.root,
+                metadata={
+                    "repository_id": snapshot.repository.repository_id,
+                    "content_hash": snapshot.content_hash,
+                },
+            )
+        )
         plan = self.environment_broker.resolve(context.environment_requirement)
         mounts = list(self._private_mounts(context.run_id))
         mounts.append(

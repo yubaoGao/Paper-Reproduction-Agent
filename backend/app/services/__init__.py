@@ -22,7 +22,7 @@ from .repository_analysis import (
 from .alignment import AlignmentSettings,AlignmentValidationError,PaperCodeAlignmentError
 from .planning import PlanningSettings,PlanningValidationError,ReproductionPlanningError
 from .reproduction_intake import ReproductionIntakeError,ReproductionIntakeService
-from .result_resolution import CanonicalResultResolver,RepositoryResultAdapter,ResultResolutionRequest,ResultResolver,aggregate_final_result
+from .result_resolution import CanonicalResultResolver,RepositoryResultAdapter,RepositoryResultAdapterRegistry,ResultResolutionRequest,ResultResolver,aggregate_final_result
 from .result_comparison import DeterministicResultComparator,MetricIdentityNormalizer
 from .persistence import (
     ComparisonReportRepository,FinalResultRepository,PersistenceConflictError,
@@ -53,6 +53,7 @@ from .reproduction_api import (
     PlanningBlockedError,ReproductionAnalysisPipeline,ReproductionAPIService,
 )
 from .product_events import ProductEventPublisher
+from .job_finalization import JobFinalizationError,JobResultFinalizer
 
 __all__ = [
     "CompositePaperParser",
@@ -73,7 +74,7 @@ __all__ = [
     "AlignmentSettings","AlignmentValidationError","PaperCodeAlignmentError",
     "PlanningSettings","PlanningValidationError","ReproductionPlanningError",
     "ReproductionIntakeError","ReproductionIntakeService",
-    "CanonicalResultResolver","RepositoryResultAdapter","ResultResolutionRequest","ResultResolver","aggregate_final_result",
+    "CanonicalResultResolver","RepositoryResultAdapter","RepositoryResultAdapterRegistry","ResultResolutionRequest","ResultResolver","aggregate_final_result",
     "DeterministicResultComparator","MetricIdentityNormalizer",
     "ComparisonReportRepository","FinalResultRepository","PersistenceConflictError",
     "PersistenceEntityNotFoundError","PersistenceUnitOfWork","PlanningSnapshotRepository",
@@ -95,4 +96,5 @@ __all__ = [
     "APIUseCaseError","EntityNotFoundError","IntakeAnalysis","InvalidIntakeStateError",
     "PlanningBlockedError","ReproductionAnalysisPipeline","ReproductionAPIService",
     "ProductEventPublisher",
+    "JobFinalizationError","JobResultFinalizer",
 ]

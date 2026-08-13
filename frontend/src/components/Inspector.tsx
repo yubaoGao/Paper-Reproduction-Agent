@@ -185,7 +185,7 @@ function Resources({ intake, job, events }: Pick<Props, "intake" | "job" | "even
         <div className="gpu-summary-heading"><CloudServerOutlined /><strong>Current task GPU</strong>{waiting ? <Badge status="warning" text="Waiting" /> : allocation ? <Badge status="processing" text="Assigned" /> : <Badge status="default" text="Backend managed" />}</div>
         <Descriptions column={1} size="small" colon={false}>
           <Descriptions.Item label="Requirement">{job?.gpu_requirement ? "Declared by execution plan" : "Not reported"}</Descriptions.Item>
-          <Descriptions.Item label="Allocation">{allocation ? String(allocation.allocated_gpu_ids ?? allocation.gpu_ids ?? "Allocated") : "None"}</Descriptions.Item>
+          <Descriptions.Item label="Allocation">{allocation ? String(allocation.device_ids ?? allocation.allocated_gpu_ids ?? allocation.gpu_ids ?? "Allocated") : "None"}</Descriptions.Item>
           <Descriptions.Item label="Scheduler">{waiting ? String(waiting.payload.reason ?? "WAITING_FOR_GPU") : "No active wait"}</Descriptions.Item>
         </Descriptions>
         <Typography.Text type="secondary">Only resources associated with this reproduction are shown.</Typography.Text>

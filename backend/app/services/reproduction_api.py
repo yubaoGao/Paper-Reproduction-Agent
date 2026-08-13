@@ -12,7 +12,8 @@ from backend.app.domain import (
     PaperCodeAlignmentCatalog, PaperExperimentCatalog, PaperReference,
     PlanStatus, RepositoryAnalysisCatalog, ReproductionEventType,
     ReproductionExecutionPlan, ReproductionIntake, ReproductionIntakeState,
-    ReproductionJob, ReproductionJobStatus, UserReproductionGoal,
+    ReproductionJob, ReproductionJobStatus, RepositorySnapshot, UserReproductionGoal,
+    ResultValidationStatus,
 )
 from backend.app.services.external_resources import ExternalResourceResolutionService
 from backend.app.services.persistence import PersistenceEntityNotFoundError
@@ -41,6 +42,7 @@ class IntakeAnalysis:
     repository_catalog: RepositoryAnalysisCatalog
     alignment_catalog: PaperCodeAlignmentCatalog
     goal_resolution: GoalResolutionResult
+    repository_snapshot: RepositorySnapshot | None = None
 
 
 class ReproductionAnalysisPipeline(Protocol):
@@ -48,7 +50,7 @@ class ReproductionAnalysisPipeline(Protocol):
 
     def analyze(
         self, *, intake_id: str, source_filename: str, paper_pdf: bytes,
-        repository_url: str, goal: str,
+        repository_url: str, goal: str, on_event=None,
     ) -> IntakeAnalysis: ...
 
     def clarify(
@@ -75,14 +77,16 @@ class ReproductionAPIService:
             created_at=now, updated_at=now,
         )
         self.persistence.intakes.create(intake)
-        self._event(intake, ReproductionEventType.PAPER_ANALYSIS_STARTED, {"filename": source_filename})
         analysis = self.pipeline.analyze(
             intake_id=intake.intake_id, source_filename=source_filename,
             paper_pdf=paper_pdf, repository_url=repository_url, goal=goal,
+            on_event=lambda event_type, payload: self._event(intake, event_type, payload),
         )
-        self._event(intake, ReproductionEventType.PAPER_ANALYSIS_COMPLETED, {"paper_id": analysis.paper.id})
-        self._event(intake, ReproductionEventType.REPOSITORY_ANALYSIS_STARTED, {"repository_url": repository_url})
-        self._event(intake, ReproductionEventType.REPOSITORY_ANALYSIS_COMPLETED, {"repository_catalog_id": analysis.repository_catalog.catalog_id})
+        if analysis.repository_snapshot is not None:
+            registry = getattr(self.persistence, "repository_snapshots", None)
+            if registry is None:
+                raise APIUseCaseError("production persistence omitted the repository snapshot registry")
+            registry.register(analysis.repository_snapshot)
         intake = intake.model_copy(update={
             "paper": analysis.paper, "paper_catalog": analysis.paper_catalog,
             "repository_catalog": analysis.repository_catalog,
@@ -197,7 +201,11 @@ class ReproductionAPIService:
 
     def results(self, job_id: str, *, principal: str):
         self.get_job(job_id, principal=principal)
-        return tuple(item.result for item in self.persistence.final_results.list_by_job(job_id))
+        return tuple(
+            item.result
+            for item in self.persistence.final_results.list_by_job(job_id)
+            if item.validation_status is ResultValidationStatus.VALID
+        )
 
     def comparison(self, job_id: str, *, principal: str):
         self.get_job(job_id, principal=principal)

@@ -38,7 +38,7 @@ class RepositoryAnalyzerAgent:
                 catalog=catalog.model_copy(update={"analysis_status":RepositoryAnalysisStatus.PARTIAL,"analysis_metadata":catalog.analysis_metadata.model_copy(update={"missing_components":missing,"warnings":tuple(dict.fromkeys((*catalog.analysis_metadata.warnings,review_warning)))})})
             finished=datetime.now(timezone.utc)
             trace=RepositoryAnalysisTrace(analysis_id=f"repository-analysis:{snapshot.snapshot_id}",repository_id=reference.repository_id,commit_sha=snapshot.resolved_commit_sha,started_at=started,finished_at=finished,selected_files=context.selected_files,selected_symbols=context.selected_symbols,primary_calls=sum(x.role is LLMRole.PRIMARY for x in calls),fast_calls=sum(x.role is LLMRole.FAST for x in calls),repair_count=repairs,prompt_versions={x:"v1" for x in ("context_classification","stage_analysis","repair","catalog_review")},usage=tuple(x.model_dump(mode="json") for x in calls),warnings=catalog.analysis_metadata.warnings,status=catalog.analysis_status)
-            return RepositoryAnalysisResult(catalog=catalog,trace=trace)
+            return RepositoryAnalysisResult(catalog=catalog,trace=trace,snapshot=snapshot)
         except RepositoryAnalysisError:raise
         except Exception as exc:raise RepositoryAnalysisError(f"repository analysis failed: {exc}") from exc
     @staticmethod

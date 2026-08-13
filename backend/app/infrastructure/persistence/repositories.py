@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Iterator
 
 from sqlalchemy import delete, select, update
@@ -27,6 +28,7 @@ from backend.app.domain import (
     ReproductionEvent,
     ReproductionEventType,
     ReproductionIntake,
+    RepositorySnapshot,
 )
 from backend.app.orchestration.ports import ConcurrentRunUpdateError
 from backend.app.services.persistence import PersistenceConflictError, PersistenceEntityNotFoundError
@@ -37,7 +39,7 @@ from .models import (
     ComparisonReportRow,
     FinalResultRow,
     PlanningSnapshotRow,
-    ReproductionJobRow,
+    ReproductionJobRow, RepositorySnapshotRegistrationRow,
     ReproductionIntakeRow,
     ReproductionEventRow,
     ReproductionRunRow,
@@ -231,6 +233,47 @@ class PostgresReproductionEventRepository(_Repository):
             event_type=ReproductionEventType(row.event_type), payload=row.payload_json,
             created_at=row.created_at,
         )
+
+
+class PostgresRepositorySnapshotRegistry(_Repository):
+    """Durable trusted mapping consumed only by sandbox composition."""
+
+    def register(self, snapshot: RepositorySnapshot) -> None:
+        host_path = str(Path(snapshot.root).resolve(strict=True))
+        if not Path(host_path).is_dir():
+            raise ValueError("repository snapshot root must be a directory")
+        with self._write() as session:
+            existing = session.get(RepositorySnapshotRegistrationRow, snapshot.snapshot_id)
+            if existing is not None:
+                if (
+                    existing.host_path != host_path
+                    or existing.content_hash != snapshot.content_hash
+                    or existing.resolved_commit_sha != snapshot.resolved_commit_sha
+                ):
+                    raise PersistenceConflictError(
+                        "repository snapshot ID is registered with different immutable content"
+                    )
+                return
+            session.add(RepositorySnapshotRegistrationRow(
+                snapshot_id=snapshot.snapshot_id,
+                repository_id=snapshot.repository.repository_id,
+                resolved_commit_sha=snapshot.resolved_commit_sha,
+                content_hash=snapshot.content_hash,
+                host_path=host_path,
+                snapshot_json=serialize_domain(snapshot),
+                created_at=utc_now(),
+            ))
+
+    def get(self, snapshot_id: str) -> RepositorySnapshot:
+        with self._read() as session:
+            row = session.get(RepositorySnapshotRegistrationRow, snapshot_id)
+            if row is None:
+                raise PersistenceEntityNotFoundError(
+                    f"unknown repository snapshot {snapshot_id!r}"
+                )
+            payload = dict(row.snapshot_json)
+            payload["root"] = row.host_path
+            return deserialize_domain(payload, RepositorySnapshot)
 
 
 class PostgresPlanningSnapshotRepository(_Repository):
@@ -534,6 +577,7 @@ class PostgresPersistence:
         self.intakes = PostgresReproductionIntakeRepository(session_factory)
         self.events = PostgresReproductionEventRepository(session_factory)
         self.planning_snapshots = PostgresPlanningSnapshotRepository(session_factory)
+        self.repository_snapshots = PostgresRepositorySnapshotRegistry(session_factory)
         self.runs = PostgresReproductionRunRepository(session_factory)
         self.final_results = PostgresFinalResultRepository(session_factory)
         self.comparisons = PostgresComparisonReportRepository(session_factory)
@@ -568,6 +612,7 @@ class PostgresProductPersistence:
         self.events = PostgresReproductionEventRepository(session_factory)
         self.jobs = PostgresReproductionJobRepository(session_factory)
         self.planning_snapshots = PostgresPlanningSnapshotRepository(session_factory)
+        self.repository_snapshots = PostgresRepositorySnapshotRegistry(session_factory)
         self.runs = PostgresReproductionRunRepository(session_factory)
         self.final_results = PostgresFinalResultRepository(session_factory)
         self.comparisons = PostgresComparisonReportRepository(session_factory)

@@ -23,6 +23,34 @@ function retryableStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
+export function parseProductEventBlock(
+  block: string,
+  lastSequence: number,
+): ProductEvent | undefined {
+  let eventType = "message";
+  let lastEventId = "";
+  const data: string[] = [];
+  block.split(/\r?\n/).forEach((line) => {
+    if (!line || line.startsWith(":")) return;
+    const separator = line.indexOf(":");
+    const field = separator < 0 ? line : line.slice(0, separator);
+    const value = separator < 0 ? "" : line.slice(separator + 1).replace(/^ /, "");
+    if (field === "event") eventType = value;
+    if (field === "id" && !value.includes("\0")) lastEventId = value;
+    if (field === "data") data.push(value);
+  });
+  if (!data.length || !PRODUCT_EVENT_TYPES.includes(eventType as typeof PRODUCT_EVENT_TYPES[number])) return undefined;
+  try {
+    const event = JSON.parse(data.join("\n")) as ProductEvent;
+    const sequence = Number(event.sequence ?? lastEventId);
+    if (event.type !== eventType || !Number.isFinite(sequence) || sequence <= lastSequence) return undefined;
+    event.sequence = sequence;
+    return event;
+  } catch {
+    return undefined;
+  }
+}
+
 export class ReproductionEventStream {
   private controller?: AbortController;
   private generation = 0;
@@ -110,30 +138,11 @@ export class ReproductionEventStream {
   }
 
   private dispatchBlock(block: string): void {
-    let eventType = "message";
-    let lastEventId = "";
-    const data: string[] = [];
-    block.split(/\r?\n/).forEach((line) => {
-      if (!line || line.startsWith(":")) return;
-      const separator = line.indexOf(":");
-      const field = separator < 0 ? line : line.slice(0, separator);
-      const value = separator < 0 ? "" : line.slice(separator + 1).replace(/^ /, "");
-      if (field === "event") eventType = value;
-      if (field === "id" && !value.includes("\0")) lastEventId = value;
-      if (field === "data") data.push(value);
-    });
-    if (!data.length || !PRODUCT_EVENT_TYPES.includes(eventType as typeof PRODUCT_EVENT_TYPES[number])) return;
-    try {
-      const event = JSON.parse(data.join("\n")) as ProductEvent;
-      const sequence = Number(event.sequence ?? lastEventId);
-      if (event.type !== eventType || !Number.isFinite(sequence) || sequence <= this.lastSequence) return;
-      event.sequence = sequence;
-      this.onEvent(event);
-      this.lastSequence = sequence;
-      localStorage.setItem(cursorKey(this.jobId), String(sequence));
-    } catch {
-      // Malformed product events are ignored and never rendered as raw/private text.
-    }
+    const event = parseProductEventBlock(block, this.lastSequence);
+    if (!event) return;
+    this.onEvent(event);
+    this.lastSequence = event.sequence;
+    localStorage.setItem(cursorKey(this.jobId), String(event.sequence));
   }
 }
 

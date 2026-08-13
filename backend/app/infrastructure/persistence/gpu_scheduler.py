@@ -308,7 +308,13 @@ class PostgresGPUScheduler:
         return len(rows)
 
     def reconcile(self, *, now: datetime | None = None) -> int:
-        """Release expired, terminal, and requeued-job GPU leases."""
+        """Release expired and terminal GPU leases.
+
+        A job remains QUEUED for a short, legitimate interval between GPU
+        allocation and the job-claim CAS. Treating QUEUED as abandoned lets a
+        second scheduler release that newly created lease. Deferral explicitly
+        requeues its lease, and a worker crash is recovered by lease expiry.
+        """
         moment = now or utc_now()
         terminal = {
             ReproductionJobStatus.SUCCEEDED.value,
@@ -325,7 +331,6 @@ class PostgresGPUScheduler:
                         or_(
                             GPULeaseRow.expires_at <= moment,
                             ReproductionJobRow.status.in_(terminal),
-                            ReproductionJobRow.status == ReproductionJobStatus.QUEUED.value,
                         ),
                     )
                     .order_by(GPULeaseRow.expires_at, GPULeaseRow.lease_token)
@@ -488,6 +493,32 @@ class PostgresGPUScheduler:
                 request.status = GPURequestStatus.COMPLETED.value
                 request.active_lease_token = None
                 self._sync_request_json(request)
+
+    def complete_step(self, job_id: str, step_id: str, worker_id: str, *, now=None) -> None:
+        """Release exactly one completed step lease without reopening its request."""
+        moment = now or utc_now()
+        with self._session_factory.begin() as session:
+            row = session.scalar(
+                select(GPULeaseRow)
+                .where(
+                    GPULeaseRow.job_id == job_id,
+                    GPULeaseRow.step_id == step_id,
+                    GPULeaseRow.status == "active",
+                )
+                .with_for_update()
+            )
+            if row is None:
+                return
+            if row.worker_id != worker_id:
+                raise GPULeaseLostError("completed step GPU lease belongs to another worker")
+            self._clear_devices(session, row.lease_token)
+            request_row = session.get(GPUSchedulingRequestRow, row.request_id)
+            if request_row is not None:
+                request_row.status = GPURequestStatus.COMPLETED.value
+                request_row.active_lease_token = None
+                self._sync_request_json(request_row)
+            row.status = "released"
+            row.released_at = moment
 
     @staticmethod
     def _active_owned_lease(session, token, worker_id, moment):

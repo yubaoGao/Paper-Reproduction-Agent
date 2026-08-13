@@ -85,6 +85,20 @@ class PlanningSnapshotRow(PersistenceBase):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class RepositorySnapshotRegistrationRow(PersistenceBase):
+    """Trusted worker-only mapping from an immutable snapshot ID to its host path."""
+
+    __tablename__ = "repository_snapshot_registrations"
+
+    snapshot_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    repository_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    resolved_commit_sha: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    host_path: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ReproductionRunRow(PersistenceBase):
     __tablename__ = "reproduction_runs"
 
