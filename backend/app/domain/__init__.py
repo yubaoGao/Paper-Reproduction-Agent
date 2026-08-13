@@ -94,6 +94,12 @@ from .alignment import (
     DatasetAlignment,EvaluationPolicyAlignment,EvaluationPolicyAlignmentStatus,ExperimentAlignmentRecord,MetricAlignment,ModelAlignment,PaperCodeAlignmentCatalog,
     ParameterAlignment,ParameterMappingStatus,UnmatchedAlignmentItem,
 )
+from .comparison import (
+    ComparisonEvidenceChain, ComparisonPolicyKind, ExecutionFailureReference,
+    ExperimentComparison, ExperimentComparisonStatus, MetricComparison,
+    MetricComparisonPolicy, MetricComparisonStatus, MetricIdentity,
+    ReproductionComparisonReport,
+)
 from .planner import (
     BlockerSeverity,DecisionSource,ExperimentDependency,PlanBlocker,PlanningMetadata,PlanningOverrides,
     PlanningTrace,PlannerDecision,PlanStatus,ReproductionExecutionPlan,ReproductionPolicy,UnresolvedPlanItem,
@@ -192,4 +198,7 @@ __all__ = [
     "ArtifactReference","AttemptRecord","AttemptStatus","FailureCategory","FailureRecord",
     "PatchRecord","PatchStatus","ReproductionRun","RunManifest","StepRun","StepStatus",
     "ValidationPhase","ValidationRecord",
+    "ComparisonEvidenceChain","ComparisonPolicyKind","ExecutionFailureReference",
+    "ExperimentComparison","ExperimentComparisonStatus","MetricComparison",
+    "MetricComparisonPolicy","MetricComparisonStatus","MetricIdentity","ReproductionComparisonReport",
 ]
