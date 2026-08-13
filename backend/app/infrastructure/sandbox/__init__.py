@@ -15,6 +15,7 @@ from .environment import (
     TrustedSystemPackageResolver,
     environment_fingerprint,
 )
+from .external_resources import SandboxExternalResourceBinder
 from .manager import DockerEngineBackend, LinuxSandboxManager, SandboxRuntimeUnavailableError
 from .manifests import DependencyManifestError, DependencyManifestParser
 from .models import *

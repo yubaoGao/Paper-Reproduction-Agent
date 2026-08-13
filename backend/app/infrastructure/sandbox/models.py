@@ -61,6 +61,7 @@ class MountCategory(str, Enum):
     REPOSITORY_SNAPSHOT_READ_ONLY = "repository_snapshot_read_only"
     DATASET_READ_ONLY = "dataset_read_only"
     CHECKPOINT_READ_ONLY = "checkpoint_read_only"
+    PRETRAINED_MODEL_READ_ONLY = "pretrained_model_read_only"
     APPROVED_CONFIG_READ_ONLY = "approved_config_read_only"
     RUN_PRIVATE_VOLUME_READ_WRITE = "run_private_volume_read_write"
 

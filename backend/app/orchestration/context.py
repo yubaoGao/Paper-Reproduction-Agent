@@ -14,7 +14,10 @@ from backend.app.runtime.state import run_namespace, run_thread_id
 
 
 class PlanStepContextFactory:
-    def create(self, plan: ReproductionExecutionPlan, step_id: str, runtime_run_id: str, *, action=None):
+    def create(
+        self, plan: ReproductionExecutionPlan, step_id: str, runtime_run_id: str,
+        *, action=None, external_resources=(),
+    ):
         experiment = next(item for item in plan.experiments if item.id == step_id)
         command = action.command if action is not None else experiment.resolved_command
         if command is None:
@@ -71,6 +74,7 @@ class PlanStepContextFactory:
             config_ids=command.config_ids,
             command=command,
             dataset_requirement=dataset,
+            external_resources=tuple(external_resources),
             environment_requirement=experiment.environment_requirement,
             resource_requirement=experiment.resource_requirement,
             hyperparameters=experiment.hyperparameters,

@@ -39,6 +39,14 @@ from .gpu import (
     GPULeaseLostError,GPUScheduler,ResourceAdaptationAgent,
     MultiGPUSemanticsAnalyzer,WorkerGPUResourcePort,
 )
+from .external_resources import (
+    ExternalResourcePathValidator,ExternalResourceResolutionService,
+    RequiredExternalResourceDeriver,ResourceAccessDeniedError,
+    ResourcePathValidationError,ResourcePreparationHintBuilder,
+    ResourceRegistry,ResourceRegistryError,ResourcesNotReadyError,
+    ResolvedExternalResourceProvider,
+    ResourceAwareReproductionIntakeService,
+)
 
 __all__ = [
     "CompositePaperParser",
@@ -71,4 +79,10 @@ __all__ = [
     "GPULeaseLostError","GPUScheduler","ResourceAdaptationAgent",
     "WorkerGPUResourcePort",
     "MultiGPUSemanticsAnalyzer",
+    "ExternalResourcePathValidator","ExternalResourceResolutionService",
+    "RequiredExternalResourceDeriver","ResourceAccessDeniedError",
+    "ResourcePathValidationError","ResourcePreparationHintBuilder",
+    "ResourceRegistry","ResourceRegistryError","ResourcesNotReadyError",
+    "ResolvedExternalResourceProvider",
+    "ResourceAwareReproductionIntakeService",
 ]

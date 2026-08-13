@@ -154,6 +154,29 @@ class ComparisonReportRow(PersistenceBase):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class ExternalResourceBindingRow(PersistenceBase):
+    __tablename__ = "external_resource_bindings"
+    __table_args__ = (
+        Index(
+            "ix_external_resource_identity",
+            "resource_type", "canonical_key", "owner_principal", "shared",
+        ),
+    )
+
+    resource_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
+    canonical_key: Mapped[str] = mapped_column(Text, nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    host_path: Mapped[str] = mapped_column(Text, nullable=False)
+    access: Mapped[str] = mapped_column(String(32), nullable=False)
+    owner_principal: Mapped[str | None] = mapped_column(String(255), index=True)
+    shared: Mapped[bool] = mapped_column(nullable=False, default=False, index=True)
+    validation_status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    binding_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class GPUDeviceRow(PersistenceBase):
     __tablename__ = "gpu_devices"
 

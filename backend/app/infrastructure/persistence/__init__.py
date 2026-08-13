@@ -5,6 +5,7 @@ from .job_queue import PostgresDurableJobQueue
 from .gpu_scheduler import (
     PostgresGPUAwareJobQueue,PostgresGPUScheduler,PostgresGPUWorkerResourcePort,
 )
+from .resource_registry import PostgresResourceRegistry
 from .repositories import (
     PostgresComparisonReportRepository,
     PostgresFinalResultRepository,
@@ -20,6 +21,7 @@ __all__ = [
     "PersistenceBase",
     "PostgresDurableJobQueue",
     "PostgresGPUScheduler",
+    "PostgresResourceRegistry",
     "PostgresGPUWorkerResourcePort",
     "PostgresGPUAwareJobQueue",
     "PostgresComparisonReportRepository",

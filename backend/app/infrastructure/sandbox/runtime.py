@@ -14,6 +14,7 @@ from .models import (
     SandboxResourceLimits,
     SandboxSpec,
 )
+from .external_resources import SandboxExternalResourceBinder
 
 
 class SandboxSession:
@@ -59,6 +60,7 @@ class SandboxRuntimeService:
         provisioner,
         provisioning_network_resource_id: str | None = None,
         gpu_lease_provider=None,
+        external_resource_binding_provider=None,
     ) -> None:
         self.manager = manager
         self.environment_broker = environment_broker
@@ -67,6 +69,7 @@ class SandboxRuntimeService:
         self.provisioner = provisioner
         self.provisioning_network_resource_id = provisioning_network_resource_id
         self.gpu_lease_provider = gpu_lease_provider
+        self.external_resource_binding_provider = external_resource_binding_provider
 
     def prepare(self, context):
         if not context.repository_snapshot_id:
@@ -81,18 +84,15 @@ class SandboxRuntimeService:
                 read_only=True,
             )
         )
-        dataset_id = None
-        if isinstance(context.dataset_requirement, dict):
-            dataset_id = context.dataset_requirement.get("repository_dataset_id")
-        if dataset_id:
-            mounts.append(
-                SandboxMount(
-                    resource_id=f"dataset:{dataset_id}",
-                    target="/datasets/input",
-                    category=MountCategory.DATASET_READ_ONLY,
-                    read_only=True,
+        if context.external_resources:
+            if self.external_resource_binding_provider is None:
+                raise RuntimeError(
+                    "external resource references require a validated binding provider"
                 )
+            binder = SandboxExternalResourceBinder(
+                self.resource_registry, self.external_resource_binding_provider,
             )
+            mounts.extend(binder.mount_for(item) for item in context.external_resources)
         if plan.reused_environment_id:
             mounts.append(
                 SandboxMount(

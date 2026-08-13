@@ -18,6 +18,7 @@ from backend.app.domain import (
     AttemptStatus,
     FailureCategory,
     ExperimentActionType,
+    ExternalResourceType,
     ResultAggregation,
     ResourceAdaptationOutcome,
     PatchStatus,
@@ -74,6 +75,7 @@ class ReproductionOrchestrator:
         context_factory=None,
         result_resolver=None,
         resource_adaptation_port=None,
+        external_resource_reference_provider=None,
     ) -> None:
         self.repository = repository
         self.command_port = command_port
@@ -87,6 +89,7 @@ class ReproductionOrchestrator:
         self.context_factory = context_factory or PlanStepContextFactory()
         self.result_resolver = result_resolver
         self.resource_adaptation_port = resource_adaptation_port
+        self.external_resource_reference_provider = external_resource_reference_provider
         self.state_machine = RunStateMachine()
         self.dispatcher = ExecutionDispatcher(self.state_machine)
         self.patch_coordinator = (
@@ -95,6 +98,7 @@ class ReproductionOrchestrator:
         self.guard = ExperimentSpecificationGuard()
 
     def execute(self, plan: ReproductionExecutionPlan, run_id: str) -> ReproductionRun:
+        self._validate_external_resources(plan)
         run = create_reproduction_run(plan, run_id)
         self.repository.create(run)
         return self._continue(plan, run)
@@ -102,6 +106,7 @@ class ReproductionOrchestrator:
     def resume(self, plan: ReproductionExecutionPlan, run_id: str) -> ReproductionRun:
         """Resume one persisted non-terminal aggregate without creating a second run."""
 
+        self._validate_external_resources(plan)
         run = self.repository.get(run_id)
         if run.status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}:
             return run
@@ -172,7 +177,10 @@ class ReproductionOrchestrator:
         if action is not None and action.action_type is ExperimentActionType.AGGREGATE:
             return self._execute_aggregate_step(run,experiment,action,step_id)
         runtime_run_id = f"{run.run_id}:step:{step_id}"
-        context = self.context_factory.create(plan, experiment.id, runtime_run_id,action=action)
+        context = self.context_factory.create(
+            plan, experiment.id, runtime_run_id, action=action,
+            external_resources=self._external_resources(experiment),
+        )
         run = self._transition_step(run, step_id, StepStatus.PREPARING)
         try:
             workspace = self.workspace_port.prepare(context)
@@ -701,6 +709,33 @@ class ReproductionOrchestrator:
     def _action(experiment,step_id):
         if experiment.action_plan is None:return None
         return next(item for item in experiment.action_plan.actions if item.action_id==step_id)
+
+    @staticmethod
+    def _paper_experiment_id(experiment):
+        return experiment.metadata.get("paper_experiment_id", experiment.id)
+
+    def _external_resources(self, experiment):
+        if self.external_resource_reference_provider is None:
+            return ()
+        return self.external_resource_reference_provider.references_for(
+            self._paper_experiment_id(experiment)
+        )
+
+    def _validate_external_resources(self, plan):
+        for experiment in plan.experiments:
+            if experiment.dataset_requirement is None:
+                continue
+            if self.external_resource_reference_provider is None:
+                raise RuntimeError(
+                    "external dataset resolution must complete before execution"
+                )
+            if not any(
+                item.resource_type is ExternalResourceType.DATASET
+                for item in self._external_resources(experiment)
+            ):
+                raise RuntimeError(
+                    "selected experiment has no validated external dataset binding"
+                )
 
     @staticmethod
     def _run_policy(policy,action):

@@ -344,12 +344,14 @@ class PostgresComparisonReportRepository(_Repository):
 class PostgresPersistenceUnitOfWork:
     """One local PostgreSQL transaction shared by all persistence repositories."""
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(self, session_factory: sessionmaker[Session], resource_path_validator=None) -> None:
         self._session_factory = session_factory
+        self._resource_path_validator = resource_path_validator
         self._session: Session | None = None
 
     def __enter__(self):
         from .job_queue import PostgresDurableJobQueue
+        from .resource_registry import PostgresResourceRegistry
 
         self._session = self._session_factory()
         self._session.begin()
@@ -359,6 +361,10 @@ class PostgresPersistenceUnitOfWork:
         self.final_results = PostgresFinalResultRepository(self._session_factory, self._session)
         self.comparisons = PostgresComparisonReportRepository(self._session_factory, self._session)
         self.queue = PostgresDurableJobQueue(self._session_factory, self._session)
+        self.resources = PostgresResourceRegistry(
+            self._session_factory, self._session,
+            path_validator=self._resource_path_validator,
+        )
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> bool:
@@ -378,8 +384,12 @@ class PostgresPersistenceUnitOfWork:
 class PostgresPersistence:
     """Repository bundle; construct again with the same database to recover state."""
 
-    def __init__(self, session_factory: sessionmaker[Session], *, gpu_inventory_provider=None) -> None:
+    def __init__(
+        self, session_factory: sessionmaker[Session], *, gpu_inventory_provider=None,
+        external_resource_path_validator=None,
+    ) -> None:
         from .job_queue import PostgresDurableJobQueue
+        from .resource_registry import PostgresResourceRegistry
         from .gpu_scheduler import (
             PostgresGPUAwareJobQueue,PostgresGPUScheduler,
             PostgresGPUWorkerResourcePort,
@@ -395,6 +405,10 @@ class PostgresPersistence:
         self.final_results = PostgresFinalResultRepository(session_factory)
         self.comparisons = PostgresComparisonReportRepository(session_factory)
         self.queue = PostgresDurableJobQueue(session_factory)
+        self.external_resource_path_validator = external_resource_path_validator
+        self.resources = PostgresResourceRegistry(
+            session_factory, path_validator=external_resource_path_validator,
+        )
         self.gpu_scheduler = PostgresGPUScheduler(
             session_factory, inventory_provider=gpu_inventory_provider,
         )
@@ -404,7 +418,9 @@ class PostgresPersistence:
         )
 
     def transaction(self) -> PostgresPersistenceUnitOfWork:
-        return PostgresPersistenceUnitOfWork(self.session_factory)
+        return PostgresPersistenceUnitOfWork(
+            self.session_factory, self.external_resource_path_validator,
+        )
 
 
 def _job_values(job: ReproductionJob) -> dict:

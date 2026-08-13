@@ -26,6 +26,20 @@ class TrustedResourceRegistry:
             resource = resource.model_copy(update={"host_path": str(path)})
         self._resources[resource.resource_id] = resource
 
+    def register_or_validate(self, resource: RegisteredResource) -> None:
+        """Idempotently register one exact resource; never replace an existing ID."""
+        existing = self._resources.get(resource.resource_id)
+        if existing is None:
+            self.register(resource)
+            return
+        candidate = resource
+        if resource.kind is ResourceKind.HOST_PATH:
+            candidate = resource.model_copy(
+                update={"host_path": str(Path(resource.host_path).resolve(strict=True))}
+            )
+        if existing != candidate:
+            raise ResourceRegistrationError("resource ID is registered with different metadata")
+
     def resolve(self, resource_id: str) -> RegisteredResource:
         try:
             return self._resources[resource_id]

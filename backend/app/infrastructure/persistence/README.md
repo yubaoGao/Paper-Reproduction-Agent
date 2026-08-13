@@ -40,3 +40,12 @@ Migration `20260813_03` adds GPU inventory, scheduling-request, and lease tables
 Allocation locks waiting requests and available device rows in one transaction,
 supports bounded backfilling with aging reservation, and recovers expired leases.
 GPU binaries and runtime state are not stored in PostgreSQL.
+
+## External scientific resources
+
+Migration `20260813_04` adds the external resource registry. Configure
+`ExternalResourcePathValidator` with administrator-approved shared roots and
+per-principal roots when constructing `PostgresPersistence`. The default has no
+approved roots and fails closed. Dataset/checkpoint/model contents remain on the
+host; PostgreSQL stores canonical path, identity, ownership, read-only access,
+and validation metadata only.

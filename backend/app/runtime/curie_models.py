@@ -10,6 +10,7 @@ from pydantic import Field, JsonValue, model_validator
 from backend.app.domain import (
     Artifact,
     EnvironmentRequirement,
+    ExternalResourceReference,
     ExecutableCommand,
     Metric,
     MetricExpectation,
@@ -77,6 +78,7 @@ class CurieExecutionContext(DomainModel):
     config_ids: tuple[NonEmptyStr, ...] = ()
     command: ExecutableCommand
     dataset_requirement: JsonValue | None = None
+    external_resources: tuple[ExternalResourceReference, ...] = ()
     environment_requirement: EnvironmentRequirement
     resource_requirement: ResourceRequirement
     hyperparameters: dict[NonEmptyStr, JsonValue] = Field(default_factory=dict)

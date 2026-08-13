@@ -111,6 +111,13 @@ from .gpu import (
     ResourceAdaptationOutcome, ResourceAdaptationReason, ResourceAdaptationRecord,
     ResourceAdaptationRequest, SemanticImpact,
 )
+from .external_resources import (
+    ExternalResourceIntakeResult, ExternalResourceReference,
+    ExternalResourceRequirement, ExternalResourceType,
+    ResourceAccess, ResourceBinding, ResourceBindingValidationStatus,
+    ResourceIntakeState, ResourcePreparationHint, ResourceResolution,
+    ResourceResolutionReport, ResourceResolutionStatus, normalize_resource_name,
+)
 from .planner import (
     BlockerSeverity,DecisionSource,ExperimentDependency,PlanBlocker,PlanningMetadata,PlanningOverrides,
     PlanningTrace,PlannerDecision,PlanStatus,ReproductionExecutionPlan,ReproductionPolicy,UnresolvedPlanItem,
@@ -219,4 +226,9 @@ __all__ = [
     "RepositoryResourceCapabilities","ResourceAdaptationDecision",
     "ResourceAdaptationOutcome","ResourceAdaptationReason","ResourceAdaptationRecord",
     "ResourceAdaptationRequest","SemanticImpact",
+    "ExternalResourceIntakeResult","ExternalResourceReference",
+    "ExternalResourceRequirement","ExternalResourceType",
+    "ResourceAccess","ResourceBinding","ResourceBindingValidationStatus",
+    "ResourceIntakeState","ResourcePreparationHint","ResourceResolution",
+    "ResourceResolutionReport","ResourceResolutionStatus","normalize_resource_name",
 ]

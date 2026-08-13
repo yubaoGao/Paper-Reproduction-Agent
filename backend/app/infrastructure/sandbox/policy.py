@@ -51,6 +51,7 @@ _READ_ONLY_CATEGORIES = {
     MountCategory.REPOSITORY_SNAPSHOT_READ_ONLY,
     MountCategory.DATASET_READ_ONLY,
     MountCategory.CHECKPOINT_READ_ONLY,
+    MountCategory.PRETRAINED_MODEL_READ_ONLY,
     MountCategory.APPROVED_CONFIG_READ_ONLY,
 }
 _ALLOWED_WRITE_ROOTS = {
@@ -67,6 +68,7 @@ _CATEGORY_TARGET_ROOTS = {
     MountCategory.REPOSITORY_SNAPSHOT_READ_ONLY: ("/source/repository",),
     MountCategory.DATASET_READ_ONLY: ("/datasets",),
     MountCategory.CHECKPOINT_READ_ONLY: ("/checkpoints",),
+    MountCategory.PRETRAINED_MODEL_READ_ONLY: ("/checkpoints",),
     MountCategory.APPROVED_CONFIG_READ_ONLY: ("/config",),
 }
 
