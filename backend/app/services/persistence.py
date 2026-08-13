@@ -13,6 +13,7 @@ from backend.app.domain.persistence import (
     ResultValidationStatus,
 )
 from backend.app.orchestration.ports import ReproductionRunRepository
+from .job_queue import DurableJobQueue
 
 
 class PersistenceEntityNotFoundError(LookupError):
@@ -63,6 +64,7 @@ class PersistenceUnitOfWork(Protocol):
     runs: ReproductionRunRepository
     final_results: FinalResultRepository
     comparisons: ComparisonReportRepository
+    queue: DurableJobQueue
 
     def __enter__(self) -> "PersistenceUnitOfWork": ...
     def __exit__(self, exc_type, exc, traceback) -> bool: ...

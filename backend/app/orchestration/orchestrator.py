@@ -93,16 +93,37 @@ class ReproductionOrchestrator:
     def execute(self, plan: ReproductionExecutionPlan, run_id: str) -> ReproductionRun:
         run = create_reproduction_run(plan, run_id)
         self.repository.create(run)
-        run = self._transition_run(run, RunStatus.QUEUED)
+        return self._continue(plan, run)
+
+    def resume(self, plan: ReproductionExecutionPlan, run_id: str) -> ReproductionRun:
+        """Resume one persisted non-terminal aggregate without creating a second run."""
+
+        run = self.repository.get(run_id)
+        if run.status in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}:
+            return run
+        verify_plan(run, plan)
+        return self._continue(plan, run)
+
+    def _continue(self, plan: ReproductionExecutionPlan, run: ReproductionRun) -> ReproductionRun:
+        if run.status is RunStatus.PENDING:
+            run = self._transition_run(run, RunStatus.QUEUED)
         if self._cancel_requested(run.run_id):
             return self._cancel(run)
-        run = self._transition_run(run, RunStatus.PREPARING)
-        verify_plan(run, plan)
-        run = self._transition_run(run, RunStatus.RUNNING)
+        if run.status is RunStatus.QUEUED:
+            run = self._transition_run(run, RunStatus.PREPARING)
+        if run.status is RunStatus.PREPARING:
+            verify_plan(run, plan)
+            run = self._transition_run(run, RunStatus.RUNNING)
+        if run.status is not RunStatus.RUNNING:
+            raise RuntimeError(f"cannot continue reproduction run from {run.status.value}")
 
         while True:
             if self._cancel_requested(run.run_id):
                 return self._cancel(run)
+            recovered = self._recover_interrupted_steps(run)
+            if recovered != run:
+                self._save(run, recovered)
+                run = recovered
             reconciled = self.dispatcher.reconcile(run)
             if reconciled != run:
                 self._save(run, reconciled)
@@ -189,8 +210,9 @@ class ReproductionOrchestrator:
             run = self._transition_step(run, step_id, StepStatus.RUNNING)
             final_result = None
             final_validations = ()
-            for attempt_number in range(1, self.retry_policy.max_attempts + 1):
-                if attempt_number > 1:
+            first_attempt = len(step_record.attempts) + 1
+            for attempt_number in range(first_attempt, self.retry_policy.max_attempts + 1):
+                if attempt_number > first_attempt:
                     run = self._transition_step(run, step_id, StepStatus.RUNNING)
                 started = datetime.now(timezone.utc)
                 request = CommandExecutionRequest.model_validate(
@@ -577,6 +599,69 @@ class ReproductionOrchestrator:
         updated = self.state_machine.replace_step(run, replacement)
         self._save(run, updated)
         return updated
+
+    def _recover_interrupted_steps(self, run):
+        transient = {
+            StepStatus.PREPARING,
+            StepStatus.RUNNING,
+            StepStatus.VALIDATING,
+            StepStatus.PATCHING,
+            StepStatus.RETRYING,
+        }
+        interrupted = tuple(step for step in run.steps if step.status in transient)
+        if len(interrupted) > 1:
+            raise RuntimeError("persisted run has multiple active steps and cannot be recovered safely")
+        current = run
+        for original in interrupted:
+            step = self.state_machine.step(current, original.step_id)
+            if step.status not in transient:
+                continue
+            last = step.attempts[-1] if step.attempts else None
+            if last is not None and last.status is AttemptStatus.SUCCEEDED:
+                replacement = self._copy(
+                    step,
+                    status=StepStatus.SUCCEEDED,
+                    artifacts=last.artifacts,
+                    final_result=last.final_result,
+                    failure=None,
+                    analysis=step.analysis or {"recovery": "persisted_successful_attempt"},
+                    conclusion=step.conclusion or "Recovered a persisted successful attempt.",
+                    finished_at=datetime.now(timezone.utc),
+                )
+            elif last is not None and last.status is AttemptStatus.CANCELLED:
+                replacement = self._copy(
+                    step,
+                    status=StepStatus.CANCELLED,
+                    finished_at=datetime.now(timezone.utc),
+                )
+            elif len(step.attempts) >= self.retry_policy.max_attempts:
+                failure = (
+                    last.failures[-1]
+                    if last is not None and last.failures
+                    else self.classifier.record(
+                        step.step_id,
+                        max(1, len(step.attempts)),
+                        FailureCategory.UNKNOWN,
+                        "INTERRUPTED_ATTEMPTS_EXHAUSTED",
+                        "worker stopped after exhausting persisted attempts",
+                        retryable=False,
+                    )
+                )
+                replacement = self._copy(
+                    step,
+                    status=StepStatus.FAILED,
+                    failure=failure,
+                    finished_at=datetime.now(timezone.utc),
+                )
+            else:
+                replacement = self._copy(
+                    step,
+                    status=StepStatus.READY,
+                    failure=None,
+                    finished_at=None,
+                )
+            current = self.state_machine.replace_step(current, replacement)
+        return current
 
     def _attach_patch(self, run, step_id, patch):
         step = self.state_machine.step(run, step_id)

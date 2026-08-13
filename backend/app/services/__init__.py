@@ -29,6 +29,10 @@ from .persistence import (
     PersistenceEntityNotFoundError,PersistenceUnitOfWork,PlanningSnapshotRepository,
     ReproductionJobRepository,
 )
+from .job_queue import (
+    DurableJobQueue,InvalidJobQueueTransition,JobLeaseConflictError,JobLeaseLostError,
+    ReproductionExecutor,ReproductionExecutorFactory,
+)
 
 __all__ = [
     "CompositePaperParser",
@@ -54,4 +58,6 @@ __all__ = [
     "ComparisonReportRepository","FinalResultRepository","PersistenceConflictError",
     "PersistenceEntityNotFoundError","PersistenceUnitOfWork","PlanningSnapshotRepository",
     "ReproductionJobRepository",
+    "DurableJobQueue","InvalidJobQueueTransition","JobLeaseConflictError","JobLeaseLostError",
+    "ReproductionExecutor","ReproductionExecutorFactory",
 ]

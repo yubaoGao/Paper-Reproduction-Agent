@@ -4,6 +4,9 @@ from .dispatcher import ExecutionDispatcher
 from .failure import FailureClassifier
 from .manifest import ExecutionPlanAdmissionError, create_reproduction_run, verify_plan
 from .orchestrator import ReproductionOrchestrator, WorkspaceCleanupError
+from .worker import (
+    DurableJobCancellationPort,ReproductionWorker,WorkerDisposition,WorkerResult,
+)
 from .patching import PatchCoordinator
 from .ports import (
     CancellationPort,
@@ -28,6 +31,7 @@ __all__ = [
     "InvalidRunTransition",
     "PatchCoordinator",
     "ReproductionOrchestrator",
+    "DurableJobCancellationPort","ReproductionWorker","WorkerDisposition","WorkerResult",
     "ReproductionRunRepository",
     "RetryPolicy",
     "RunStateMachine",

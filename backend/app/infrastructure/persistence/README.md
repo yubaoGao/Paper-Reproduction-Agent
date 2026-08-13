@@ -22,3 +22,14 @@ python -m unittest tests.integration.test_postgres_persistence -v
 ```
 
 The integration test creates and removes one uniquely named schema.
+
+## Durable queue
+
+`PostgresDurableJobQueue` claims FIFO jobs with `FOR UPDATE SKIP LOCKED`.
+Every owned mutation requires both `worker_id` and a unique `lease_token`.
+Workers heartbeat before lease expiry; expired `CLAIMED`/`RUNNING` jobs are
+atomically returned to `QUEUED`, while cancellation requests remain durable.
+
+The application worker lives in `backend.app.orchestration.worker` and delegates
+execution/resume to `ReproductionOrchestrator`; it does not invoke Docker or a
+runtime directly.

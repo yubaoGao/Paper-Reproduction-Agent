@@ -85,7 +85,7 @@ class PostgresReproductionJobRepository(_Repository):
             row = session.get(ReproductionJobRow, job_id)
             if row is None:
                 raise PersistenceEntityNotFoundError(f"unknown reproduction job {job_id!r}")
-            return deserialize_domain(row.job_json, ReproductionJob)
+            return _job_from_row(row)
 
     def update(self, job: ReproductionJob) -> None:
         with self._write() as session:
@@ -101,7 +101,7 @@ class PostgresReproductionJobRepository(_Repository):
         if status is not None:
             statement = statement.where(ReproductionJobRow.status == status.value)
         with self._read() as session:
-            return tuple(deserialize_domain(row.job_json, ReproductionJob) for row in session.scalars(statement))
+            return tuple(_job_from_row(row) for row in session.scalars(statement))
 
 
 class PostgresPlanningSnapshotRepository(_Repository):
@@ -349,6 +349,8 @@ class PostgresPersistenceUnitOfWork:
         self._session: Session | None = None
 
     def __enter__(self):
+        from .job_queue import PostgresDurableJobQueue
+
         self._session = self._session_factory()
         self._session.begin()
         self.jobs = PostgresReproductionJobRepository(self._session_factory, self._session)
@@ -356,6 +358,7 @@ class PostgresPersistenceUnitOfWork:
         self.runs = PostgresReproductionRunRepository(self._session_factory, self._session)
         self.final_results = PostgresFinalResultRepository(self._session_factory, self._session)
         self.comparisons = PostgresComparisonReportRepository(self._session_factory, self._session)
+        self.queue = PostgresDurableJobQueue(self._session_factory, self._session)
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> bool:
@@ -376,12 +379,15 @@ class PostgresPersistence:
     """Repository bundle; construct again with the same database to recover state."""
 
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
+        from .job_queue import PostgresDurableJobQueue
+
         self.session_factory = session_factory
         self.jobs = PostgresReproductionJobRepository(session_factory)
         self.planning_snapshots = PostgresPlanningSnapshotRepository(session_factory)
         self.runs = PostgresReproductionRunRepository(session_factory)
         self.final_results = PostgresFinalResultRepository(session_factory)
         self.comparisons = PostgresComparisonReportRepository(session_factory)
+        self.queue = PostgresDurableJobQueue(session_factory)
 
     def transaction(self) -> PostgresPersistenceUnitOfWork:
         return PostgresPersistenceUnitOfWork(self.session_factory)
@@ -393,6 +399,14 @@ def _job_values(job: ReproductionJob) -> dict:
         "paper_title": job.paper.title,
         "user_goal": job.user_goal,
         "status": job.status.value,
+        "enqueued_at": job.enqueued_at,
+        "worker_id": job.worker_id,
+        "lease_token": job.lease_token,
+        "claimed_at": job.claimed_at,
+        "lease_expires_at": job.lease_expires_at,
+        "heartbeat_at": job.heartbeat_at,
+        "claim_count": job.claim_count,
+        "last_error": job.last_error,
         "selection_json": serialize_domain(job.selection),
         "job_json": serialize_domain(job),
         "created_at": job.created_at,
@@ -402,6 +416,25 @@ def _job_values(job: ReproductionJob) -> dict:
 
 def _job_row(job: ReproductionJob) -> ReproductionJobRow:
     return ReproductionJobRow(job_id=job.job_id, **_job_values(job))
+
+
+def _job_from_row(row: ReproductionJobRow) -> ReproductionJob:
+    payload = dict(row.job_json)
+    payload.update(
+        {
+            "status": row.status,
+            "enqueued_at": row.enqueued_at,
+            "worker_id": row.worker_id,
+            "lease_token": row.lease_token,
+            "claimed_at": row.claimed_at,
+            "lease_expires_at": row.lease_expires_at,
+            "heartbeat_at": row.heartbeat_at,
+            "claim_count": row.claim_count,
+            "last_error": row.last_error,
+            "updated_at": row.updated_at,
+        }
+    )
+    return deserialize_domain(payload, ReproductionJob)
 
 
 def _run_values(run: ReproductionRun) -> dict:

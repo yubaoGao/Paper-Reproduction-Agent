@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -15,12 +15,23 @@ class PersistenceBase(DeclarativeBase):
 
 class ReproductionJobRow(PersistenceBase):
     __tablename__ = "reproduction_jobs"
+    __table_args__ = (
+        Index("ix_reproduction_jobs_queue_order", "status", "enqueued_at", "job_id"),
+    )
 
     job_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     paper_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     paper_title: Mapped[str] = mapped_column(Text, nullable=False)
     user_goal: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    enqueued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    worker_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    lease_token: Mapped[str | None] = mapped_column(String(64))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    claim_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text)
     selection_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     job_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
