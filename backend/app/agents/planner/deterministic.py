@@ -110,6 +110,8 @@ class DeterministicPlanBuilder:
                 if not evaluation_alignment.adaptation_supported:
                     blockers.append(self._block("repository_evaluation_deviation_not_adaptable",paper_exp.experiment_id,"Repository evaluation behavior conflicts with the paper and no evidenced sandbox adaptation is available.",evaluation_alignment.alignment_id,evaluation_alignment.conflict_id));continue
             if evaluation_policy is None and evaluation_alignment is not None:evaluation_policy=evaluation_alignment.resolved_policy
+            if evaluation_policy is not None:
+                evaluation_policy=self._with_required_claim_metrics(evaluation_policy,paper_exp,paper)
             production_selection=bool(spec.selected_experiment_ids)
             if production_selection and (evaluation_policy is None or not evaluation_policy.is_resolved):
                 blockers.append(self._block("unresolved_evaluation_policy",paper_exp.experiment_id,"Final-result checkpoint, reporting and aggregation policy must be resolved before execution.",evaluation_alignment.alignment_id if evaluation_alignment else record.alignment_id,evaluation_alignment.conflict_id if evaluation_alignment else None));continue
@@ -205,6 +207,13 @@ class DeterministicPlanBuilder:
         if status in (ParameterMappingStatus.REPOSITORY_ONLY,ParameterMappingStatus.SEMANTIC_MATCH_VALUE_UNKNOWN) and mapping.repository_value is not None: return mapping.repository_value,DecisionSource.REPOSITORY_FILL,"Repository provides an explicit value missing from the paper."
         if status is ParameterMappingStatus.PAPER_ONLY and mapping.paper_value is not None: return mapping.paper_value,DecisionSource.PAPER,"Only the paper supplies an explicit value."
         return None,DecisionSource.ALIGNMENT,"Alignment does not provide a defensible value."
+
+    @staticmethod
+    def _with_required_claim_metrics(policy,paper_exp,paper):
+        claims=tuple((*paper_exp.claims,*(item for item in paper.paper_claims if item.target_id==paper_exp.experiment_id)))
+        names=tuple(dict.fromkeys(item.metric_name for item in claims))
+        if not names:return policy
+        return policy.model_copy(update={"reporting_metrics":tuple(dict.fromkeys((*policy.reporting_metrics,*names)))})
 
     def _dataset(self,exp,record,mappings,datasets,overrides,unresolved):
         if not exp.dataset: return None

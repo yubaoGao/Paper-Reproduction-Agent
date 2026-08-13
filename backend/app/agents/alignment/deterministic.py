@@ -120,7 +120,9 @@ class DeterministicAlignmentBuilder:
     def _metrics(self,paper,repository):
         output=[];conflicts=[]
         claims_by_id={x.id:x for x in (*paper.paper_claims,*(claim for experiment in paper.experiments for claim in experiment.claims))};claims=list(claims_by_id.values());groups={}
-        for claim in claims:groups.setdefault(normalize_entity(claim.metric_name).canonical_name,[]).append(claim)
+        # Preserve original paper metric identity. Normalized names are used
+        # below only to score repository candidates.
+        for claim in claims:groups.setdefault(claim.metric_name,[]).append(claim)
         for key,items in groups.items():
             matches=[x for x in repository.metrics if name_strength(normalize_entity(items[0].metric_name),normalize_entity(x.name))[0]>=.45];status=_status(1 if len(matches)==1 else .5,len(matches));repo_agg=next((str(x.details.get("aggregation")) for x in matches if x.details.get("aggregation") is not None),None);paper_agg=next((x.condition for x in items if x.condition and any(y in x.condition.casefold() for y in ("macro","micro","weighted"))),None);paper_split=next((x.split for x in items if x.split),None);repo_split=next((str(x.details.get("split")) for x in matches if x.details.get("split") is not None),None);conflict_id=None
             mismatch=(paper_agg and repo_agg and normalize_entity(paper_agg).canonical_name!=normalize_entity(repo_agg).canonical_name) or (paper_split and repo_split and normalize_entity(paper_split).canonical_name!=normalize_entity(repo_split).canonical_name)
@@ -133,6 +135,8 @@ class DeterministicAlignmentBuilder:
         for experiment in experiments:
             paper_record=paper_records[experiment.paper_experiment_id]
             paper_policy=paper_record.evaluation_policy or paper.evaluation_policy
+            if paper_policy is not None:
+                paper_policy=self._with_paper_required_metrics(paper_policy,paper_record,paper)
             repository_records=[
                 item for item in repository.evaluation_policies
                 if (item.implementation_id and item.implementation_id in experiment.repository_implementation_ids)
@@ -156,7 +160,8 @@ class DeterministicAlignmentBuilder:
             elif paper_resolved:
                 status=EvaluationPolicyAlignmentStatus.PAPER_ONLY;resolved=paper_policy;reason="paper explicitly defines the final-result policy and code does not"
             elif code_resolved:
-                status=EvaluationPolicyAlignmentStatus.CODE_FALLBACK;resolved=code_policy;reason="paper is unknown; explicit repository behavior supplies the policy"
+                resolved=self._with_paper_required_metrics(code_policy,paper_record,paper,replace=True)
+                status=EvaluationPolicyAlignmentStatus.CODE_FALLBACK;reason="paper is unknown; explicit repository behavior supplies the policy while paper claims define required reporting metrics"
             else:
                 resolved=self._scientific_default(paper_record,paper_policy,paper)
                 if resolved is None:
@@ -171,7 +176,7 @@ class DeterministicAlignmentBuilder:
     def _scientific_default(self,paper_record,paper_policy,paper):
         claims=tuple((*paper_record.claims,*(item for item in paper.paper_claims if item.target_id==paper_record.experiment_id)))
         if paper_policy is not None and paper_policy.reporting_split and paper_policy.reporting_metrics:
-            reporting_split=paper_policy.reporting_split;reporting_metrics=paper_policy.reporting_metrics
+            reporting_split=paper_policy.reporting_split;reporting_metrics=tuple(dict.fromkeys((*paper_policy.reporting_metrics,*(item.metric_name for item in claims))))
             run_count=paper_policy.run_count;seeds=paper_policy.seeds;aggregation=paper_policy.aggregation
             evidence=paper_policy.evidence
         else:
@@ -182,6 +187,13 @@ class DeterministicAlignmentBuilder:
             evidence=tuple(item.model_dump(mode="json") for claim in claims for item in claim.evidence)
         if not reporting_metrics:return None
         return EvaluationPolicy(checkpoint_policy=CheckpointPolicy.FINAL_EPOCH,reporting_split=reporting_split,reporting_metrics=reporting_metrics,run_count=run_count,seeds=seeds,aggregation=aggregation,source=EvaluationPolicySource.SCIENTIFIC_DEFAULT,evidence=evidence,confidence=EvaluationPolicyConfidence.INFERRED,warnings=("INFERRED_EVALUATION_POLICY",))
+    @staticmethod
+    def _with_paper_required_metrics(policy,paper_record,paper,replace=False):
+        claims=tuple((*paper_record.claims,*(item for item in paper.paper_claims if item.target_id==paper_record.experiment_id)))
+        names=tuple(dict.fromkeys(item.metric_name for item in claims))
+        if not names:return policy
+        reporting_metrics=names if replace else tuple(dict.fromkeys((*policy.reporting_metrics,*names)))
+        return policy.model_copy(update={"reporting_metrics":reporting_metrics})
     @staticmethod
     def _policy_signature(policy):
         return policy.model_dump_json(exclude={"source","evidence","confidence","warnings"})

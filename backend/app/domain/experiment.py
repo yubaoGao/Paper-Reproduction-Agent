@@ -507,9 +507,16 @@ class Artifact(DomainModel):
     metadata: dict[NonEmptyStr, JsonValue] = Field(default_factory=dict)
 
 
+class FinalMetricStatus(str, Enum):
+    AVAILABLE = "available"
+    MISSING = "missing"
+    UNAVAILABLE = "unavailable"
+
+
 class FinalMetric(DomainModel):
     name: NonEmptyStr
-    value: float = Field(allow_inf_nan=False)
+    status: FinalMetricStatus = FinalMetricStatus.AVAILABLE
+    value: float | None = Field(default=None, allow_inf_nan=False)
     split: NonEmptyStr
     unit: NonEmptyStr | None = None
     checkpoint_reference: NonEmptyStr | None = None
@@ -524,6 +531,16 @@ class FinalMetric(DomainModel):
         if isinstance(value, bool):
             raise ValueError("boolean values are not valid final metrics")
         return value
+
+    @model_validator(mode="after")
+    def value_matches_status(self):
+        if self.status is FinalMetricStatus.AVAILABLE and self.value is None:
+            raise ValueError("available final metric requires a value")
+        if self.status is not FinalMetricStatus.AVAILABLE and self.value is not None:
+            raise ValueError("missing or unavailable final metric cannot assert a value")
+        if self.status is not FinalMetricStatus.AVAILABLE and self.std is not None:
+            raise ValueError("missing or unavailable final metric cannot assert a standard deviation")
+        return self
 
 
 class RunFinalResult(DomainModel):
@@ -580,9 +597,22 @@ class FinalResult(DomainModel):
     evidence: tuple[JsonValue, ...] = ()
     provenance: dict[NonEmptyStr, JsonValue] = Field(default_factory=dict)
 
+    @property
+    def required_metrics(self) -> tuple[FinalMetric, ...]:
+        by_name = {item.name: item for item in self.reporting_metrics}
+        return tuple(by_name[name] for name in self.evaluation_policy.reporting_metrics if name in by_name)
+
+    @property
+    def additional_metrics(self) -> tuple[FinalMetric, ...]:
+        required = set(self.evaluation_policy.reporting_metrics)
+        return tuple(item for item in self.reporting_metrics if item.name not in required)
+
     @model_validator(mode="after")
     def canonical_result_matches_policy(self):
         policy = self.evaluation_policy
+        metric_names = [item.name for item in self.reporting_metrics]
+        if len(metric_names) != len(set(metric_names)):
+            raise ValueError("canonical final metrics must be unique")
         if not policy.is_resolved:
             raise ValueError("FinalResult requires a resolved EvaluationPolicy")
         if self.aggregation is not policy.aggregation:
@@ -602,10 +632,11 @@ class FinalResult(DomainModel):
         for run in self.runs:
             if not (run.artifact_references or run.evidence or run.provenance):
                 raise ValueError("per-run FinalResult requires artifact evidence or provenance")
-            if tuple(item.name for item in run.reporting_metrics) != expected_names:
-                raise ValueError("per-run reporting metrics differ from EvaluationPolicy")
-            if any(item.split != policy.reporting_split for item in run.reporting_metrics):
-                raise ValueError("per-run reporting split differs from EvaluationPolicy")
+            metrics_by_name = {item.name: item for item in run.reporting_metrics}
+            if any(name not in metrics_by_name for name in expected_names):
+                raise ValueError("per-run result omits a required reporting metric")
+            if any(metrics_by_name[name].split != policy.reporting_split for name in expected_names):
+                raise ValueError("per-run required reporting split differs from EvaluationPolicy")
             if any(not (item.evidence or item.provenance) for item in run.reporting_metrics):
                 raise ValueError("final reporting metrics require evidence or provenance")
             if policy.checkpoint_policy in {CheckpointPolicy.BEST_METRIC, CheckpointPolicy.EARLY_STOPPED}:
@@ -623,18 +654,21 @@ class FinalResult(DomainModel):
                     raise ValueError("run does not use the fixed checkpoint")
                 if policy.fixed_epoch is not None and run.selected_epoch != policy.fixed_epoch:
                     raise ValueError("run does not use the fixed epoch")
-        if tuple(item.name for item in self.reporting_metrics) != expected_names:
-            raise ValueError("canonical reporting metrics differ from EvaluationPolicy")
-        if any(item.split != policy.reporting_split for item in self.reporting_metrics):
-            raise ValueError("canonical reporting split differs from EvaluationPolicy")
+        canonical_by_name = {item.name: item for item in self.reporting_metrics}
+        if any(name not in canonical_by_name for name in expected_names):
+            raise ValueError("canonical result omits a required reporting metric")
+        if any(canonical_by_name[name].split != policy.reporting_split for name in expected_names):
+            raise ValueError("canonical required reporting split differs from EvaluationPolicy")
         if self.aggregation is ResultAggregation.NONE:
             if len(self.runs) != 1:
                 raise ValueError("non-aggregated FinalResult requires one run")
             observed = self.runs[0].reporting_metrics
-            if any(left.value != right.value for left, right in zip(self.reporting_metrics, observed)):
+            canonical_values = tuple((item.name,item.status,item.value,item.split,item.unit) for item in self.reporting_metrics)
+            observed_values = tuple((item.name,item.status,item.value,item.split,item.unit) for item in observed)
+            if canonical_values != observed_values:
                 raise ValueError("single-run canonical metrics must equal its run metrics")
         if self.aggregation is ResultAggregation.MEAN_STD and any(
-            item.std is None for item in self.reporting_metrics
+            item.status is FinalMetricStatus.AVAILABLE and item.std is None for item in self.reporting_metrics
         ):
             raise ValueError("mean/std aggregation requires std for every metric")
         if self.aggregation is ResultAggregation.MEAN and any(

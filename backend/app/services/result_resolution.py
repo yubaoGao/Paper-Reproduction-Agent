@@ -13,6 +13,7 @@ from backend.app.domain.experiment import (
     DomainModel,
     EvaluationPolicy,
     FinalMetric,
+    FinalMetricStatus,
     FinalResult,
     Metric,
     NonEmptyStr,
@@ -87,33 +88,45 @@ def aggregate_final_result(
         raise ValueError("adapter run seeds differ from EvaluationPolicy")
     expected = tuple(policy.reporting_metrics)
     for run in runs:
-        if tuple(item.name for item in run.reporting_metrics) != expected:
-            raise ValueError("adapter reporting metrics differ from EvaluationPolicy")
-        if any(item.split != policy.reporting_split for item in run.reporting_metrics):
-            raise ValueError("adapter reporting split differs from EvaluationPolicy")
+        metrics_by_name = {item.name: item for item in run.reporting_metrics}
+        if any(name not in metrics_by_name for name in expected):
+            raise ValueError("adapter omitted a required reporting metric record")
+        if any(metrics_by_name[name].split != policy.reporting_split for name in expected):
+            raise ValueError("adapter required reporting split differs from EvaluationPolicy")
 
     if policy.aggregation is ResultAggregation.NONE:
         metrics = runs[0].reporting_metrics
     else:
         aggregated = []
-        for index, name in enumerate(expected):
-            values = [run.reporting_metrics[index].value for run in runs]
-            template = runs[0].reporting_metrics[index]
-            std = statistics.stdev(values) if policy.aggregation is ResultAggregation.MEAN_STD else None
+        ordered_names = tuple(dict.fromkeys((*expected,*(item.name for run in runs for item in run.reporting_metrics))))
+        metrics_by_run = tuple({item.name:item for item in run.reporting_metrics} for run in runs)
+        for name in ordered_names:
+            observed = tuple(metrics.get(name) for metrics in metrics_by_run)
+            template = next(item for item in observed if item is not None)
+            available = all(item is not None and item.status is FinalMetricStatus.AVAILABLE for item in observed)
+            if available:
+                values = [item.value for item in observed]
+                status = FinalMetricStatus.AVAILABLE
+                value = statistics.fmean(values)
+                std = statistics.stdev(values) if policy.aggregation is ResultAggregation.MEAN_STD else None
+            else:
+                status = FinalMetricStatus.UNAVAILABLE if any(item is None or item.status is FinalMetricStatus.UNAVAILABLE for item in observed) else FinalMetricStatus.MISSING
+                value = None
+                std = None
             aggregated.append(
                 FinalMetric(
                     name=name,
-                    value=statistics.fmean(values),
-                    split=policy.reporting_split,
+                    status=status,
+                    value=value,
+                    split=policy.reporting_split if name in expected else template.split,
                     unit=template.unit,
                     std=std,
                     evidence=tuple(
                         evidence
-                        for run in runs
-                        for metric in run.reporting_metrics[index:index + 1]
+                        for metric in observed if metric is not None
                         for evidence in metric.evidence
                     ),
-                    provenance={"aggregation": policy.aggregation.value},
+                    provenance={"aggregation": policy.aggregation.value,"run_count":len(runs)},
                 )
             )
         metrics = tuple(aggregated)

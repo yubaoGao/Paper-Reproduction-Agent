@@ -1,6 +1,6 @@
 """Deterministic catalog merge, conflict preservation, and validation."""
 from __future__ import annotations
-import re
+import unicodedata
 from collections import defaultdict
 from backend.app.domain import (
     CatalogEntity, CheckpointPolicy, ConflictCandidate, ConflictType, EvidenceReference,
@@ -16,7 +16,9 @@ from .schemas import StageExtraction
 class PaperExtractionError(RuntimeError): pass
 class CatalogValidationError(PaperExtractionError): pass
 
-def _norm(value:str|None)->str: return re.sub(r"[^a-z0-9]+","",(value or "").casefold())
+def _norm(value:str|None)->str:
+    normalized=unicodedata.normalize("NFKC",value or "").casefold()
+    return "".join(character for character in normalized if character.isalnum())
 def _unique(items):
     seen=set(); result=[]
     for item in items:
@@ -90,7 +92,10 @@ class CatalogMerger:
         items=list(items)+[claim for record in experiments for claim in record.claims]
         grouped=defaultdict(list)
         for claim in items:
-            key=(claim.target_id,_norm(claim.metric_name),_norm(claim.dataset),_norm(claim.split),_norm(claim.condition),claim.unit)
+            # A metric's original name is its identity. Normalization is only
+            # suitable for candidate matching and must never merge distinct
+            # paper-defined metrics.
+            key=(claim.target_id,claim.metric_name,_norm(claim.dataset),_norm(claim.split),_norm(claim.condition),claim.unit)
             grouped[key].append(claim)
         output=[]; conflicts=[]
         for index,(key,values) in enumerate(grouped.items(),start=1):
@@ -148,7 +153,7 @@ class CatalogValidator:
         semantic_seen={}
         conflict_keys={item.semantic_key for item in catalog.conflicts}
         for claim in catalog.paper_claims:
-            key=(claim.target_id,_norm(claim.metric_name),_norm(claim.dataset),_norm(claim.split),_norm(claim.condition),claim.unit)
+            key=(claim.target_id,claim.metric_name,_norm(claim.dataset),_norm(claim.split),_norm(claim.condition),claim.unit)
             semantic="|".join(str(x or "") for x in key)
             if key in semantic_seen:
                 if semantic_seen[key]==claim.value: raise CatalogValidationError("duplicate semantic claim")

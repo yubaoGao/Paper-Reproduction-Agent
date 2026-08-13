@@ -21,7 +21,9 @@ class RepositoryAnalyzerAgent:
     def analyze(self,reference,*,paper_catalog=None,reproduction_specification=None):
         started=datetime.now(timezone.utc);calls=[];repairs=0;warnings=[];missing=[];stages=[]
         try:
-            resolved=self.resolver.resolve(reference);snapshot=self.snapshot_builder.build(resolved);static=self.static.analyze(snapshot)
+            resolved=self.resolver.resolve(reference);snapshot=self.snapshot_builder.build(resolved)
+            metric_names=self._metric_targets(paper_catalog,reproduction_specification)
+            static=self.static.analyze(snapshot,metric_names=metric_names)
             if static.warnings:missing.append("static_analysis")
             context=self.context.build(snapshot,static,paper_catalog,reproduction_specification);calls.extend(context.llm_metadata)
             payload=json.dumps({"snapshot_id":snapshot.snapshot_id,"files":[x.model_dump() for x in context.items],"entrypoints":[x.model_dump(mode="json") for x in static.entrypoints],"configs":[x.model_dump(mode="json") for x in static.configurations]},ensure_ascii=False)
@@ -39,6 +41,17 @@ class RepositoryAnalyzerAgent:
             return RepositoryAnalysisResult(catalog=catalog,trace=trace)
         except RepositoryAnalysisError:raise
         except Exception as exc:raise RepositoryAnalysisError(f"repository analysis failed: {exc}") from exc
+    @staticmethod
+    def _metric_targets(paper_catalog,reproduction_specification):
+        selected=set(getattr(reproduction_specification,"selected_experiment_ids",()) or ())
+        selected.update(target.paper_experiment_id for target in getattr(reproduction_specification,"targets",()) if target.paper_experiment_id)
+        claims=[]
+        if paper_catalog is not None:
+            claims.extend(claim for claim in paper_catalog.paper_claims if not selected or claim.target_id is None or claim.target_id in selected)
+            claims.extend(claim for experiment in paper_catalog.experiments if not selected or experiment.experiment_id in selected for claim in experiment.claims)
+        elif reproduction_specification is not None:
+            claims.extend(reproduction_specification.claims)
+        return tuple(dict.fromkeys(claim.metric_name for claim in claims))
     def _stage(self,name,payload,snapshot,static):
         calls=[];repairs=0;issue=""
         prompt=self.prompts.get("stage_analysis")

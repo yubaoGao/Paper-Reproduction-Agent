@@ -1,6 +1,6 @@
 """Deterministic static analysis. Never imports or executes repository code."""
 from __future__ import annotations
-import ast,configparser,json,re,shlex,tomllib
+import ast,configparser,hashlib,json,re,shlex,tomllib,unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -243,7 +243,7 @@ class ConfigDependencyAnalyzer:
 
 class RepositoryStaticAnalyzer:
     def __init__(self): self.python=PythonAstAnalyzer();self.tree=TreeSitterStructuralAnalyzer();self.configs=ConfigDependencyAnalyzer()
-    def analyze(self,snapshot):
+    def analyze(self,snapshot,*,metric_names=()):
         reader=SnapshotReader(snapshot);symbols=[];imports={};entrypoints=[];warnings=[]
         for record in snapshot.files:
             if not record.analysis_eligible:continue
@@ -254,7 +254,7 @@ class RepositoryStaticAnalyzer:
         configurations,dependencies,problems=self.configs.analyze(snapshot,reader);warnings.extend(problems)
         commands,shell_entries,docs,doc_conflicts=self._commands(snapshot,reader);entrypoints.extend(shell_entries)
         metadata_entries=self._metadata_entrypoints(snapshot,reader);entrypoints.extend(metadata_entries)
-        datasets,models,ablations,metrics,checkpoints,artifacts=self._components(snapshot,reader,symbols,configurations)
+        datasets,models,ablations,metrics,checkpoints,artifacts=self._components(snapshot,reader,symbols,configurations,metric_names=metric_names)
         conflicts=(*doc_conflicts,*self._dependency_conflicts(dependencies),*self._entrypoint_conflicts(snapshot,entrypoints),*self._config_cli_conflicts(snapshot,configurations,entrypoints),*self._dataset_name_conflicts(configurations))
         environments=tuple(RepositoryComponentRecord(component_id=f"env:{path}",name=Path(path).name,kind="environment",paths=(path,),evidence=(repo_evidence(snapshot,f"file:{path}"),)) for path in snapshot.manifests)
         return StaticRepositoryAnalysis(CodeIndex(symbols=tuple(symbols),imports=imports,parse_warnings=tuple(warnings)),configurations,dependencies,tuple(entrypoints),commands,datasets,models,ablations,metrics,checkpoints,artifacts,tuple(conflicts),docs,environments,tuple(warnings))
@@ -307,20 +307,42 @@ class RepositoryStaticAnalyzer:
                             command,_,target=str(item).partition("=");module,_,symbol=target.strip().partition(":");candidate=module.replace(".","/")+".py"
                             if candidate in known:entries.append(EntrypointCandidate(entrypoint_id=f"entry:{path}:{command.strip()}",entrypoint_type=PythonAstAnalyzer._entry_type(candidate,command),path=candidate,symbol_id=f"{candidate}::{symbol}" if symbol else None,interpreter="python",confidence=.9,evidence=(repo_evidence(snapshot,line_locator(path,node.lineno,getattr(node,"end_lineno",node.lineno)),str(item)),)))
         return tuple(entries)
-    def _components(self,snapshot,reader,symbols,configs):
+    def _components(self,snapshot,reader,symbols,configs,*,metric_names=()):
         datasets=[];models=[];ablations=[];metrics=[];checkpoints=[];artifacts=[]
+        metric_names=tuple(dict.fromkeys(metric_names));source_cache={}
         for symbol in symbols:
             lower=(symbol.name+" "+symbol.path).casefold();evidence=(repo_evidence(snapshot,symbol_locator(symbol.path,symbol.qualified_name)),)
             if symbol.kind not in {SymbolKind.MODULE,SymbolKind.GLOBAL} and any(x in lower for x in ("dataset","dataloader","loader")):datasets.append(RepositoryComponentRecord(component_id=f"dataset:{symbol.symbol_id}",name=symbol.name,kind="dataset_loader",paths=(symbol.path,),symbol_ids=(symbol.symbol_id,),evidence=evidence))
             if symbol.kind is SymbolKind.CLASS and any(x in lower for x in ("model","network","dmsf","classifier","encoder","decoder")):models.append(RepositoryComponentRecord(component_id=f"model:{symbol.symbol_id}",name=symbol.name,kind="model_definition",paths=(symbol.path,),symbol_ids=(symbol.symbol_id,),evidence=evidence))
             if any(x in lower for x in ("loss","criterion")):models.append(RepositoryComponentRecord(component_id=f"loss:{symbol.symbol_id}",name=symbol.name,kind="loss_definition",paths=(symbol.path,),symbol_ids=(symbol.symbol_id,),evidence=evidence))
-            if any(x in lower for x in ("accuracy","f1","bleu","rouge","auc","map","metric")):metrics.append(RepositoryComponentRecord(component_id=f"metric:{symbol.symbol_id}",name=symbol.name,kind="metric_implementation",paths=(symbol.path,),symbol_ids=(symbol.symbol_id,),evidence=evidence))
+            if symbol.path not in source_cache:
+                try:source_cache[symbol.path]=reader.text(symbol.path)
+                except RepositoryStaticAnalysisError:source_cache[symbol.path]=""
+            lines=source_cache[symbol.path].splitlines();start=max(0,symbol.start_line-1);end=min(len(lines),symbol.end_line)
+            source="\n".join(lines[start:end]);context=(lower+" "+source.casefold())
+            compact_context=self._metric_key(context)
+            targeted=tuple(name for name in metric_names if self._metric_key(name) and self._metric_key(name) in compact_context)
+            monitoring=any(term in lower for term in ("train_loss","training_loss","learning_rate","gpu_memory","memory_usage","vram"))
+            common_hint=any(term in lower for term in ("accuracy","f1","bleu","rouge","auc","map"))
+            semantic_hint=any(term in lower for term in ("metric","score","measure","quality"))
+            evaluation_context=any(term in context for term in ("eval","test","validation","final result","final_result"))
+            output_context=any(term in context for term in ("return","report","result","summary","score","metric","output"))
+            inferred=not monitoring and (common_hint or semantic_hint or (evaluation_context and output_context))
+            for name in targeted:
+                digest=hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
+                metrics.append(RepositoryComponentRecord(component_id=f"metric:{symbol.symbol_id}:paper:{digest}",name=name,kind="metric_implementation",paths=(symbol.path,),symbol_ids=(symbol.symbol_id,),details={"discovery":"paper_claim_target"},evidence=evidence))
+            if inferred and not targeted:
+                metrics.append(RepositoryComponentRecord(component_id=f"metric:{symbol.symbol_id}",name=symbol.name,kind="metric_implementation",paths=(symbol.path,),symbol_ids=(symbol.symbol_id,),details={"discovery":"evaluation_output_context"},evidence=evidence))
         for config in configs:
             lower=config.key_path.casefold();evidence=config.evidence
             if any(x in lower for x in ("ablation","use_","disable","lambda_","loss_weight")):ablations.append(RepositoryComponentRecord(component_id=f"ablation:{config.config_id}",name=config.key_path,kind="config_switch",paths=(config.path,),details={"value":config.value},evidence=evidence))
             if any(x in lower for x in ("checkpoint","resume","pretrained","weights")):checkpoints.append(RepositoryComponentRecord(component_id=f"checkpoint:{config.config_id}",name=config.key_path,kind="checkpoint_config",paths=(config.path,),details={"value":config.value},evidence=evidence))
             if any(x in lower for x in ("output","log_dir","save_dir","result")):artifacts.append(RepositoryComponentRecord(component_id=f"artifact:{config.config_id}",name=config.key_path,kind="artifact_path",paths=(config.path,),details={"value":config.value},evidence=evidence))
         return tuple(datasets),tuple(models),tuple(ablations),tuple(metrics),tuple(checkpoints),tuple(artifacts)
+    @staticmethod
+    def _metric_key(value):
+        normalized=unicodedata.normalize("NFKC",value or "").casefold()
+        return "".join(character for character in normalized if character.isalnum())
     @staticmethod
     def _dependency_conflicts(dependencies):
         groups={}

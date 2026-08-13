@@ -50,7 +50,11 @@ class EvaluationPolicyAlignment(DomainModel):
         if self.status in {EvaluationPolicyAlignmentStatus.AMBIGUOUS,EvaluationPolicyAlignmentStatus.UNKNOWN} and self.resolved_policy is not None:raise ValueError("unresolved evaluation alignment cannot select policy")
         if self.status in {EvaluationPolicyAlignmentStatus.CONFLICT,EvaluationPolicyAlignmentStatus.AMBIGUOUS} and not self.conflict_id:raise ValueError("evaluation policy conflict requires conflict record")
         if self.status in {EvaluationPolicyAlignmentStatus.ALIGNED,EvaluationPolicyAlignmentStatus.PAPER_ONLY} and self.resolved_policy!=self.paper_policy:raise ValueError("paper-backed evaluation alignment must retain the paper policy")
-        if self.status is EvaluationPolicyAlignmentStatus.CODE_FALLBACK and self.resolved_policy!=self.code_policy:raise ValueError("code fallback must retain the explicit code policy")
+        if self.status is EvaluationPolicyAlignmentStatus.CODE_FALLBACK:
+            if self.code_policy is None:raise ValueError("code fallback requires an explicit code policy")
+            resolved_behavior=self.resolved_policy.model_dump(exclude={"reporting_metrics"})
+            code_behavior=self.code_policy.model_dump(exclude={"reporting_metrics"})
+            if resolved_behavior!=code_behavior:raise ValueError("code fallback may only replace reporting scope with paper-required metrics")
         if self.status is EvaluationPolicyAlignmentStatus.ALIGNED and self.code_policy is None:raise ValueError("aligned evaluation policy requires code policy")
         if self.status is EvaluationPolicyAlignmentStatus.CONFLICT and (self.paper_policy is None or self.code_policy is None):raise ValueError("paper/code evaluation conflict requires both policies")
         if self.status is EvaluationPolicyAlignmentStatus.CONFLICT:
