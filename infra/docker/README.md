@@ -1,3 +1,5 @@
 # Docker infrastructure
 
-未来 sandbox image 与 runtime policy 的位置。`legacy/` 仅保存原 Curie runtime 的镜像定义，不可视为生产安全基线。
+Task 19 Linux deployment 使用的 sandbox image 与 runtime policy 应放在此处。
+Task 18.5 已删除不安全且不可达的 Curie legacy images；本目录中不得重新引入
+Docker socket、host network、`--gpus all` 或全局 prune。

@@ -43,7 +43,7 @@ must receive adapters keyed by exact repository ID; an unknown repository is
 not treated as supported. Reference adapters are intentionally unavailable to
 production composition.
 
-The deterministic integration suite uses test persistence and a test GPU
-provider, as permitted for composition tests. It covers happy path, ambiguous
+Future deterministic integration coverage should use isolated persistence and a controlled GPU
+provider. It should cover happy path, ambiguous
 clarification, missing resource resume, GPU wait/allocation, OOM adaptation,
 active cancellation cleanup, restart/recovery, and ordered SSE replay.

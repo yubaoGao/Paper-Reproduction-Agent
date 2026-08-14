@@ -1,10 +1,8 @@
-"""Dependency-light reproduction-mode logic shared by retained Curie components.
+"""Dependency-light scientific reasoning used by production orchestration.
 
-The legacy node modules delegate their production-mode behavior here so the
-same orchestration can be tested without importing LangGraph or OpenHands.
-These functions do not define new agents; they are the structured execution
-facets of the existing Architect, Technician, validators, Analyzer, Concluder,
-and InternalExperimentScheduler.
+The functions are deterministic facets for plan construction, partitioning,
+command preparation, analysis, and conclusion. They
+do not own platform scheduling, sandbox execution, persistence, or transport.
 """
 import hashlib
 
@@ -46,37 +44,6 @@ def technician_command(context, workspace, timeout_seconds):
         "working_directory_reference": workspace.repository_workspace,
         "environment_references": command.environment_variable_references,
         "timeout_seconds": timeout_seconds,
-    }
-
-
-def llm_validator_guard(guard, context, locked_snapshot):
-    return guard.validate_values(context, locked_snapshot)
-
-
-def patcher_guard(guard, context, proposed_values):
-    return guard.validate_patch(context, proposed_values)
-
-
-def exec_validate(result):
-    status = result.status.value
-    if status == "timed_out":
-        return {
-            "valid": False,
-            "status": "timeout",
-            "violations": ("command timed out; execution is indeterminate",),
-        }
-    if status == "failed":
-        return {
-            "valid": False,
-            "status": "failed",
-            "violations": ("command returned a non-zero exit code",),
-        }
-    if status == "succeeded" and result.exit_code == 0:
-        return {"valid": True, "status": "passed", "violations": ()}
-    return {
-        "valid": False,
-        "status": "indeterminate",
-        "violations": ("execution result is internally inconsistent",),
     }
 
 

@@ -1,3 +1,4 @@
 # Deployment
 
-未来 Linux GPU Server 部署清单与配置目录。Task 01 不实现 deployment。
+此目录是后续 Linux GPU Server 部署清单的预留位置，目前不参与生产入口、构建
+或测试。Task 18.5 没有发现可执行的部署资产。

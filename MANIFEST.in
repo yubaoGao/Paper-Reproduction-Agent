@@ -2,14 +2,11 @@ include LICENSE
 include README.md
 include AGENTS.md
 
-recursive-include backend/app/curie_core/configs *.json
-recursive-include backend/app/curie_core/prompts *.txt
 recursive-include backend/app/agents/paper/prompts *.txt
 recursive-include backend/app/agents/repository/prompts *.txt
 recursive-include backend/app/agents/alignment/prompts *.txt
 recursive-include backend/app/agents/planner/prompts *.txt
 include .env.example
-recursive-include backend/app/curie_core *.md
 recursive-include docs *.md
 
 global-exclude __pycache__

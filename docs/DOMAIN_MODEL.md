@@ -123,14 +123,9 @@ Runtime code only depends on `RunEventSink.publish(event)`.
 `Protocol`. Platform code sees only this interface and the domain models. It
 does not know about Architect, Technician, LangGraph, OpenHands or Docker.
 
-`InMemoryEventSink` is the Task 02 implementation used for deterministic unit
-tests. It returns immutable snapshots in publication order and performs no IO.
-
-`CurieRuntimeAdapter` currently translates `RunRequest` into the minimal
-`CurieRuntimeInput` seam. Its `run` method deliberately raises
-`NotImplementedError`: connecting the retained workflow safely requires later
-work on Docker/OpenHands/global-state assumptions. The adapter does not emit
-fake success events or return a fake production result.
+Production execution is owned by `ReproductionOrchestrator` and the Task 10
+sandbox adapters. Historical in-memory sinks and Curie compatibility adapters
+have been removed and are not production runtime alternatives.
 
 ## 7. Source traceability
 

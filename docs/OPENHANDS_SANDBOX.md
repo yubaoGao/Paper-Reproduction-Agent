@@ -15,4 +15,4 @@ OpenHands 可以修改 run-private repository copy，不能修改 RO repository 
 
 Secret 不放入 OpenHands prompt。需要模型 credential 时，由受信任 controller/SecretProvider 按 run 注入并脱敏，不允许读取 host `.env`、SSH/AWS config。stdout/stderr 有上限且 secret value 被 command adapter redaction。
 
-`OPENHANDS_SANDBOX_INTEGRATION=1` 只在 Linux、已安装 controller wrapper 的 digest image 上启用。真实测试需验证 workspace edit、host/shared resources 写失败、Docker socket 不存在、不能创建 sibling container、timeout/failure translation 和 `CodingResult` mapping。当前 Windows 正常 skip；没有采用上游常见的 Docker-socket mount 作为临时绕过。
+后续 OpenHands 集成验证只应在 Linux 和安装 controller wrapper 的 digest image 上显式启用，并覆盖 workspace edit、host/shared resources 写失败、Docker socket 不存在、不能创建 sibling container、timeout/failure translation 和 `CodingResult` mapping。不得采用 Docker-socket mount 作为临时绕过。

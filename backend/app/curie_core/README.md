@@ -1,7 +1,10 @@
 # Curie Core
 
-Curie Core 是 PaperReproAgent 内部复用的科学实验推理与单次实验编排组件，保留 Architect、Technician、Validator、Patcher、Analyzer、Concluder、LangGraph workflow 和 `InternalExperimentScheduler`。
+Task 18.5 审计后，生产代码只保留 `reproduction.py` 中由
+`ReproductionOrchestrator` 直接调用的、无副作用的实验推理函数。
 
-Task 09 的 production 入口是 `CurieRuntimeAdapter`。命令执行、工作区、coding agent 与 artifact 收集均通过 runtime ports 注入；Core 不再提供默认 host shell。原 `legacy_reporter.py` 仅作为历史文件保留，新的 workflow 和结果链不引用它。`backend/app/runtime/legacy/` 同样不进入 production import path。
+历史 LangGraph 节点图、内部调度器类、host shell/OpenHands 工具、报告器、
+prompts/configs、测试兼容模型和旧 Docker runtime 已删除。
 
-`reproduction.py` 是现有 Curie 组件共同委托的无重依赖 reproduction-mode 逻辑，使 Windows 单元测试不必安装 LangGraph、Docker、OpenHands 或 GPU runtime。它不定义第二套 Agent；原组件模块和 production workflow 使用同一实现。
+`curie_core` 不拥有 Docker、GPU、HTTP、数据库或宿主机执行能力。平台 GPU
+调度和沙箱执行分别由 `infrastructure/gpu` 与 `infrastructure/sandbox` 负责。

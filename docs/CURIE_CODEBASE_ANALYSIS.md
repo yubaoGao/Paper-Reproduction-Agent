@@ -2,11 +2,11 @@
 
 > 分析基线：`main` 分支，commit `db1b1f56159b591515f77e03c55bf473d5c1c201`（2025-09-28）。本文以当前源码为事实依据，不把 README 的产品描述当作实现事实。
 
-> Task 01 迁移说明：本文记录迁移前的上游路径。代码现已迁入 `backend/app/curie_core/`；宿主 Docker 启动代码位于 `backend/app/runtime/legacy/`，Dockerfile 位于 `infra/docker/legacy/`。路径变化不改变本文对上游 commit 的事实分析。
+> 历史审计说明：本文记录迁移前上游 commit 的代码与风险，不描述当前 production tree。Task 18.5 已删除旧 LangGraph、host Docker runtime 与 legacy images；路径引用仅用于解释上游事实。
 
 ## 1. 结论摘要
 
-Curie 当前是一个**单进程、单实验、内存态的 LangGraph 科学实验运行时**。宿主侧 `curie.experiment(...)` 负责准备输入、启动一个外层 Docker 容器；容器内 `construct_workflow_graph.py` 建图并运行。图中的 LLM 节点通过结构化工具写实验计划、调用 OpenHands 生成或修补实验脚本、执行脚本、验证并分析结果，最后由报告器生成 Markdown 报告。
+该上游基线中的 Curie 是一个**单进程、单实验、内存态的 LangGraph 科学实验运行时**。宿主侧 `curie.experiment(...)` 负责准备输入、启动一个外层 Docker 容器；容器内 `construct_workflow_graph.py` 建图并运行。图中的 LLM 节点通过结构化工具写实验计划、调用 OpenHands 生成或修补实验脚本、执行脚本、验证并分析结果，最后由报告器生成 Markdown 报告。
 
 它具备值得复用的实验闭环，但不是多租户平台，也没有 GPU 资源调度、持久作业状态、队列 worker、权限边界或安全沙箱。源码里名为 scheduler 的组件只调度实验计划分区在逻辑节点间流转，并不调度服务器资源。
 

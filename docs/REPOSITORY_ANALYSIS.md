@@ -46,4 +46,4 @@ flowchart TD
 
 缺失信息使用 `UNKNOWN`；只有存在明确静态依据时才可标为 `INFERRED`，并携带 evidence/confidence。仓库本来没有 Dockerfile 等组件不构成 `PARTIAL`；只有本应处理的分析阶段实际失败才是 `PARTIAL`。无法建立或验证基础 Catalog 时抛出分析错误，对应 `FAILED`，而不是返回不可用 Catalog。
 
-普通单元测试完全离线。真实远程 Git 测试需显式设置 `RUN_GIT_REPOSITORY_INTEGRATION=1`，默认跳过。
+后续恢复测试时，普通单元测试必须完全离线；真实远程 Git 验证必须显式 opt-in。

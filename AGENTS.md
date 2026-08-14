@@ -2,9 +2,8 @@
 
 ## Boundaries
 
-- `backend/app/curie_core` owns scientific experiment reasoning and experiment-internal orchestration only.
-- `backend/app/runtime` owns runtime contracts. New platform code must not import `backend.app.runtime.legacy`.
-- `InternalExperimentScheduler` is not the future platform GPU scheduler.
+- `backend/app/curie_core` owns only the retained dependency-light scientific reasoning facets.
+- `backend/app/runtime` owns provider-neutral runtime contracts and models; the legacy runtime has been removed.
 - Domain and service code must stay independent of Docker, LangGraph provider globals, and HTTP frameworks.
 - Do not introduce HTTP handlers that execute experiments synchronously.
 
@@ -16,6 +15,5 @@
 
 ## Validation
 
-- Run `python -m compileall backend` for backend structural changes.
-- Run `pnpm run build` from `frontend/` for frontend changes.
-- Linux Docker/GPU integration validation belongs to the deployment environment and must be run explicitly.
+- Run `python -m compileall backend` for local structural changes.
+- Run `pnpm run typecheck` and `pnpm run build` from `frontend/` for frontend changes.

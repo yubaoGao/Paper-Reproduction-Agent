@@ -35,7 +35,7 @@ PENDING → QUEUED → PREPARING → RUNNING → SUCCEEDED | FAILED
 
 Step 使用 `PENDING → READY → PREPARING → RUNNING → VALIDATING` 主链；验证失败可进入 `PATCHING → RETRYING → RUNNING`，依赖失败进入 `BLOCKED`。所有 terminal state 不允许再次转换。Attempt history 只能按 1、2、3……连续追加，失败重试不会覆盖前一次 exit code、validation、failure、patch、artifact 或 metric。
 
-`ReproductionRunRepository` 是带 optimistic revision 的持久化端口。production 代码没有 `InMemoryStore` 实现；数据库、队列和 worker 留给后续任务。`CancellationPort` 同样是外部协调边界。
+`ReproductionRunRepository` 是带 optimistic revision 的持久化端口。Production composition 使用 PostgreSQL repositories、durable GPU queue 和独立 worker；不提供 production `InMemoryStore`。`CancellationPort` 同样是外部协调边界。
 
 ## DAG 与 artifact
 
@@ -57,6 +57,6 @@ Step 使用 `PENDING → READY → PREPARING → RUNNING → VALIDATING` 主链�
 
 拒绝部分：Curie host Docker management、Docker socket、host namespaces、`--gpus all`、global prune、shell command 拼接、host pip/conda mutation、writable shared workspace、plaintext secret、telemetry、reporter `exec()`、production `InMemoryStore`。Orchestration package 不导入 Docker SDK、`subprocess`、HTTP framework 或 `runtime.legacy`。
 
-## 延期能力
+## 部署边界
 
-本 Task 不实现 PostgreSQL、Redis、Celery、queue worker、GPU Scheduler、FastAPI、React 或真实 Linux deployment。Linux Docker、OpenHands、NVIDIA、environment reuse 的端到端验证继续由最终 deployment task 执行；Windows 只运行 domain、state machine、dispatcher、policy 和 port-isolation unit tests。
+PostgreSQL、durable queue、GPU Scheduler、FastAPI、React 与 Linux sandbox 已由后续 Task 接入。Task 19 仍负责真实 Linux GPU deployment 配置与端到端运维验证。当前仓库没有自动测试套件，后续应恢复 domain、state machine、dispatcher、policy 和 port-isolation coverage。

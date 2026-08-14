@@ -54,4 +54,4 @@ flowchart TD
 
 论文中的 `MVSA-S / Full Model / Accuracy=0.7533 / F1=0.7531` 可以与 repository 的 `configs/mvsa_single.yaml`、`main.py` 和对应 DMSF model/metric implementation 建立有证据的候选关系。`lambda_cl` 或 `center_weight=0` 只有在 repository 已存在 config/flag/branch 证据时才可映射到消融；系统不会凭空建议“把权重设为 0”。这里不决定最终运行哪个 command，留给 Task 08。
 
-普通测试不访问模型 API。真实 DeepSeek structured alignment 仅在同时设置 `RUN_ALIGNMENT_INTEGRATION=1` 与 `DEEPSEEK_API_KEY` 时运行。
+后续恢复测试时，普通 profile 不得访问模型 API；真实 DeepSeek structured alignment 必须显式 opt-in 并注入凭据。

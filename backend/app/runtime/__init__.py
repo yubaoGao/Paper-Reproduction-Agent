@@ -1,28 +1,10 @@
-"""Runtime contracts and implementations."""
+"""Provider-neutral runtime contracts.
 
-from backend.app.domain import RunRequest, RunResult
+Production code imports concrete runtime models and ports from their defining
+modules. Test-only adapters and sinks are intentionally not re-exported here,
+so importing a production submodule cannot initialize in-memory helpers.
+"""
 
-from .curie_adapter import CurieRuntimeAdapter, CurieRuntimeInput
-from .event_sinks import InMemoryEventSink
 from .interfaces import ExperimentRuntime, RunEventSink
-from .curie_models import *
-from .event_bridge import CurieEventBridge
-from .guard import ExperimentSpecificationGuard,SpecificationGuardResult,SpecificationViolation,SpecificationViolationError
-from .llm_factory import CurieLLMFactory
-from .ports import ArtifactCollectionPort,CodingAgentPort,CommandExecutionPort,ExecutionBackendUnavailableError,RuntimeMetadataPort,WorkspacePort
-from .state import CheckpointFactory,CurieStateStore,CurieStateStoreFactory,InMemoryCheckpointFactory,InMemoryCurieStateStore,InMemoryCurieStateStoreFactory,run_namespace,run_thread_id
-from .translation import CurieInputTranslator
-from .workflow import CurieReproductionWorkflow
 
-__all__ = [
-    "CurieRuntimeAdapter",
-    "CurieRuntimeInput",
-    "ExperimentRuntime",
-    "InMemoryEventSink",
-    "RunEventSink",
-    "RunRequest",
-    "RunResult",
-    "ArtifactCollectionPort","CodingAgentPort","CommandExecutionPort","ExecutionBackendUnavailableError","RuntimeMetadataPort","WorkspacePort",
-    "CurieEventBridge","CurieInputTranslator","CurieReproductionWorkflow","ExperimentSpecificationGuard","SpecificationGuardResult","SpecificationViolation","SpecificationViolationError","CurieLLMFactory",
-    "CheckpointFactory","CurieStateStore","CurieStateStoreFactory","InMemoryCheckpointFactory","InMemoryCurieStateStore","InMemoryCurieStateStoreFactory","run_namespace","run_thread_id",
-]
+__all__ = ["ExperimentRuntime", "RunEventSink"]

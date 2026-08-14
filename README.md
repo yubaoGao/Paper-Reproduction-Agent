@@ -1,6 +1,6 @@
 # PaperReproAgent
 
-PaperReproAgent 是面向论文实验自动复现的 AI Agent 平台。当前仓库已完成 Task 05：论文实验智能理解、证据约束的 `PaperExperimentCatalog` 和复现目标解析，以及生产级 Paper Ingestion、论文复现领域模型和运行时边界。
+PaperReproAgent 是面向论文实验自动复现的 AI Agent 平台。当前仓库包含生产 FastAPI、PostgreSQL 持久化与队列、GPU 调度、隔离执行 Worker、规范化结果与比较链，以及 React 科研工作台。
 
 ## 当前能力
 
@@ -13,6 +13,9 @@ PaperReproAgent 是面向论文实验自动复现的 AI Agent 平台。当前仓
 - 通过 DeepSeek V4-Pro PRIMARY 与 Qwen3.6-Flash FAST/VISION 的固定角色完成分阶段实验抽取；
 - 验证 evidence locator、文本与 numeric claim，保留冲突并生成可审计 ExtractionTrace；
 - 将用户复现目标确定性解析为 Catalog 有界的 `ReproductionSpecification`。
+- 通过 PostgreSQL 持久化 intake、计划、队列、事件、运行与最终结果；
+- Worker 经 GPU scheduler 和 Task 10 Linux sandbox 执行结构化命令；
+- 通过 SSE 投影产品事件，前端展示任务、实验、资源、结果与证据链。
 
 详细设计、依赖和安全策略见 [Paper Ingestion](docs/PAPER_INGESTION.md)。
 论文智能抽取架构见 [论文实验智能理解与抽取](docs/PAPER_EXPERIMENT_EXTRACTION.md)。
@@ -30,12 +33,12 @@ Docling 首次运行可能下载模型权重；生产环境应在构建/部署�
 ## 分层边界
 
 - `backend/app/domain/`：解析器无关的论文和实验领域模型；
-- `backend/app/services/`：Paper Ingestion 应用契约与组合策略；
-- `backend/app/infrastructure/paper/`：Docling、pypdf 与安全下载适配器；
-- `backend/app/curie_core/`：科学实验推理和实验内部编排；
-- `backend/app/runtime/`：平台运行时契约，不依赖 legacy runtime。
-
-本阶段没有实现 Experiment Extraction Agent、自动生成 `ReproductionSpecification`、Repository Analyzer、Paper-Code Alignment、Planner、Result Comparator、FastAPI、PostgreSQL、Redis、GPU Scheduler、Docker Experiment Runtime 或 React。
+- `backend/app/services/`：应用用例、结果解析/比较和产品事件；
+- `backend/app/infrastructure/`：PostgreSQL、论文/仓库解析、GPU 与安全 sandbox adapters；
+- `backend/app/orchestration/`：持久化计划驱动的复现状态机；
+- `backend/app/curie_core/`：复现链实际使用的轻量科学推理函数；
+- `backend/app/runtime/`：平台运行时契约和结构化执行模型，不包含 legacy runtime；
+- `backend/app/api/` 与 `backend/app/worker/`：相互独立的生产入口。
 
 ## Windows 本地检查
 
@@ -43,6 +46,7 @@ Docling 首次运行可能下载模型权重；生产环境应在构建/部署�
 python -m compileall backend
 Set-Location frontend
 pnpm install --frozen-lockfile
+pnpm run typecheck
 pnpm run build
 ```
 

@@ -14,8 +14,6 @@ name: Pull Request
 
 **Checklist**
 - [ ] I have updated the corresponding `README.md`, documentation, or tutorials if applicable.
-<!-- - [ ] I have added or updated tests where relevant. -->
-<!-- - [ ] I have ensured all existing and new tests pass locally. -->
 <!-- - [ ] I have run lint checks (`ruff`, `black`, etc.) to comply with project code style. -->
 <!-- - [ ] I have documented new functions/classes or significant changes using docstrings. -->
 

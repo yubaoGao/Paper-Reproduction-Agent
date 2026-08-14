@@ -17,11 +17,7 @@ venv/
 
 # Runtime artifacts and local credentials
 logs/
-workspace/*
-!workspace/.gitkeep
+workspace/
 .setup/
 config.toml
 .aws_creds
-
-# Retained legacy runtime local configuration
-backend/app/curie_core/config.toml

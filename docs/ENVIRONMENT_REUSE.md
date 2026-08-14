@@ -40,4 +40,4 @@ Repository 的 `install.sh`、setup shell、README 命令、Dockerfile 永远不
 
 RunResult metadata 包含 `environment_provenance`：strategy、fingerprint、base image digest、cache IDs、required downloads 和选择原因；`SandboxAuditRecord` 同时记录实际 strategy/environment ID。`ReusableEnvironmentArtifact` 支持 OCI image、Conda archive、read-only prefix、package-cache source；非 image artifact 必须引用 trusted registry ID。
 
-环境复用 Linux 测试由 `ENVIRONMENT_REUSE_INTEGRATION=1` 启用，需配置管理员 environment registry。测试应在 probe/provision 前后对 shared prefix 做 hash，证明缺包和 probe 都不会改变 host env。
+后续环境复用 Linux 验证必须显式 opt-in 并配置管理员 environment registry；验证应在 probe/provision 前后对 shared prefix 做 hash，证明缺包和 probe 都不会改变 host env。

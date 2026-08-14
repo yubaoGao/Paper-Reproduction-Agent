@@ -28,7 +28,7 @@ Production selected-paper-experiment path 还必须拥有 resolved `EvaluationPo
 
 `ReproductionPlanValidator` 检查输入目录身份、commit、目标覆盖、入口/config/command/dataset/claim/Alignment 引用、参数决策、消融 provenance、依赖顺序、状态一致性，以及 STRICT 模式是否遗漏未解决冲突。`PlanningTrace` 记录输入身份、策略、时间、确定性决策数、PRIMARY/FAST 调用、修复次数、prompt 版本、warning、blocker 和无密钥 usage 元数据。
 
-职责链严格保持为：Reproduction Planner → `ExperimentSpecification` → Future `CurieRuntimeAdapter` → Curie Core。Planner 回答“运行什么”；未来 Curie Architect 负责单个规格内部“怎样组织和推进执行”。本模块没有 Docker、GPU 调度、Curie/Technician/OpenHands 调用、仓库执行、数据下载、网络或文件修改能力。
+职责链严格保持为：Reproduction Planner → `ReproductionExecutionPlan` → Worker → `ReproductionOrchestrator` → Task 10 Sandbox。Planner 回答“运行什么”；orchestrator 使用保留的 Curie reasoning facets 推进锁定规格。本模块没有 Docker、GPU 调度、仓库执行、数据下载、网络或文件修改能力。
 
 ## 验证命令
 

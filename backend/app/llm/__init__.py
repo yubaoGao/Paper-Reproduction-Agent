@@ -12,7 +12,6 @@ from .contracts import (
     StructuredOutputError,
 )
 from .router import LLMRouter
-from .curie_factory import CurieLLMFactory
 
 __all__ = [
     "DeepSeekStructuredLLMAdapter",
@@ -27,5 +26,4 @@ __all__ = [
     "StructuredLLMClient",
     "StructuredLLMResponse",
     "StructuredOutputError",
-    "CurieLLMFactory",
 ]

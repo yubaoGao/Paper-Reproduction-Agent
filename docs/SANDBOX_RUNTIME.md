@@ -76,4 +76,4 @@ GPU Scheduler 不在 Task 10。Sandbox 仅接受 `AssignedDeviceSet` 的明确 d
 
 ## Linux 验证
 
-普通 unit tests 不需要 Docker。实验室 Linux 使用 `SANDBOX_LINUX_INTEGRATION=1` 并配置 digest image、quota volume driver、管理员 fixture；NVIDIA 使用独立 `NVIDIA_SANDBOX_INTEGRATION=1`。这些测试不在 Windows 自动执行。
+后续恢复测试时，普通 unit profile 不应需要 Docker。实验室 Linux 验证应使用显式 opt-in，并配置 digest image、quota volume driver、管理员 fixture；NVIDIA 验证使用独立 profile，不在 Windows 自动执行。
