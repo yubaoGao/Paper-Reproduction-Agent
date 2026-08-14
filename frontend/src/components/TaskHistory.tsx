@@ -16,18 +16,18 @@ interface Props {
 
 export function TaskHistory({ jobs, activeJobId, activeIntake, loading, onNew, onSelectJob, onSelectIntake }: Props) {
   return (
-    <aside className="history-panel" aria-label="Reproduction sessions">
+    <aside className="history-panel" aria-label="复现会话">
       <div className="panel-heading">
         <div>
-          <span className="eyebrow">Workspace</span>
-          <h2>Reproductions</h2>
+          <span className="eyebrow">工作台</span>
+          <h2>复现任务</h2>
         </div>
         <span className="history-count">{jobs.length}</span>
       </div>
       <Button type="primary" icon={<PlusOutlined />} block size="large" onClick={onNew}>
-        New reproduction
+        新建复现
       </Button>
-      <div className="history-section-label">Recent sessions</div>
+      <div className="history-section-label">最近会话</div>
       <div className="history-list">
         {loading && <Skeleton active paragraph={{ rows: 5 }} title={false} />}
         {!loading && activeIntake && !jobs.some((job) => job.job_id === activeIntake.job_id) && (
@@ -52,7 +52,7 @@ export function TaskHistory({ jobs, activeJobId, activeIntake, loading, onNew, o
           </button>
         ))}
         {!loading && jobs.length === 0 && !activeIntake && (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No reproductions yet" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无复现任务" />
         )}
       </div>
     </aside>

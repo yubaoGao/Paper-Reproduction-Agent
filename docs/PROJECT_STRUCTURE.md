@@ -28,7 +28,6 @@ PaperReproAgent/
 ├── infra/
 │   ├── docker/legacy/           # 未适配的原 Curie images
 │   └── deployment/              # 未来 Linux GPU 部署
-├── tests/unit/                  # Windows/Docker/GPU-independent tests
 ├── docs/
 ├── scripts/
 ├── README.md
@@ -74,7 +73,7 @@ Curie Core 不负责 User、Authentication、HTTP、Database、Job Queue、GPU a
 | `starter_file/` 与 `.gitmodules` | 仅旧 benchmark、测试脚本和 legacy 路径提示引用；公开 API 接受外部 `codebase_dir` | bundled fixtures/submodules 不应成为论文复现产品输入 |
 | `curie/main.py` | 只被旧教程调用；setup 的实际入口曾是 `experiment.py` | 与 experiment host orchestration 重复的 legacy argparse CLI |
 | `curie/generate_report.py` | 只被 `curie-report` entrypoint 使用；workflow 直接调用 `reporter.generate_report` | 独立起容器的 legacy report CLI，无平台 contract |
-| `curie/tests/` | 逐文件检查：大量 import-time shell/LLM/stdin、缺失符号和 benchmark fixture；不是稳定 pytest suite | 以 `tests/unit` 中无外部依赖测试替代 |
+| `curie/tests/` | 逐文件检查：大量 import-time shell/LLM/stdin、缺失符号和 benchmark fixture；不是稳定 pytest suite | 与仓库内测试目录一并移除，不进入生产包 |
 | 旧 docs/tutorial/example logs/static assets | 只引用已删除 CLI/benchmark/Curie 产品内容 | 避免继续把仓库描述为 Curie demo 产品；保留源码分析并新增本文件 |
 | benchmark configs/prompts | 只由已删除 benchmark task configs 或手工覆盖引用 | 不属于通用 Curie Core；保留 base/template/simple/experiment prompts |
 | 原 Docker CI/deploy stub | 构建已迁移且明确不在本阶段验证的旧镜像，deploy 仅 echo | 改为 compile + unit CI |

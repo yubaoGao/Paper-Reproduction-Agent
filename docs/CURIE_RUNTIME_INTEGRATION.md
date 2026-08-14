@@ -40,7 +40,7 @@ Curie Core 不拥有 host execution。运行时只依赖四个最小端口：
 - `WorkspacePort`：返回 run、repository 与 artifact workspace 引用；
 - `ArtifactCollectionPort`：收集明确产物引用。
 
-production 包不提供 fake port，也不实现 Docker Sandbox。缺少 command/workspace/artifact backend 时，`CurieRuntimeAdapter.run()` 明确抛出 `ExecutionBackendUnavailableError`。测试中的 scripted/in-memory ports 只位于 `tests/`。未来 Task 10 的 Linux Sandbox/OpenHands adapter 实现这些端口，无需修改 Curie Agent。
+production 包不提供 fake port，也不实现 Docker Sandbox。缺少 command/workspace/artifact backend 时，`CurieRuntimeAdapter.run()` 明确抛出 `ExecutionBackendUnavailableError`。Linux Sandbox/OpenHands adapter 实现这些端口时，无需修改 Curie Agent。
 
 ## 状态、事件和结果
 
@@ -70,12 +70,10 @@ production 包不提供 fake port，也不实现 Docker Sandbox。缺少 command
 
 没有创建 `PaperReproArchitect`、`NewTechnician` 等第二套 Agent。`curie_core/reproduction.py` 是既有组件共同委托的无重依赖 reproduction-mode 核心，用来在未安装 LangGraph/OpenHands 的 Windows 测试中验证相同锁定与阶段语义；原组件模块与 production workflow 使用同一实现。
 
-## 验证与 opt-in integration
+## 验证
 
 ```powershell
-python -m compileall backend tests
-python -m unittest discover -s tests/unit -v
-python -m unittest discover -s tests/integration -v
+python -m compileall backend
 ```
 
-DeepSeek 测试需设置 `CURIE_LLM_INTEGRATION=1` 和 `DEEPSEEK_API_KEY`。OpenHands 测试需未来 Task 10 Linux Sandbox、已安装 OpenHands，并设置 `CURIE_OPENHANDS_INTEGRATION=1`；Windows 正常 skip。
+DeepSeek 与 OpenHands 的真实集成验证应在隔离环境中显式运行，并通过环境变量注入凭据；Windows 本地结构检查不需要这些外部能力。

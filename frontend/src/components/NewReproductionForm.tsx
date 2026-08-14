@@ -21,12 +21,12 @@ export function NewReproductionForm({ loading, error, onSubmit }: Props) {
   return (
     <div className="new-reproduction">
       <div className="welcome-mark"><span>RP</span></div>
-      <span className="eyebrow">New research session</span>
-      <h1>What would you like to reproduce?</h1>
-      <p className="welcome-copy">Share the paper, its implementation, and your scientific goal. ReproPilot will resolve the experiment scope before any execution begins.</p>
-      {error && <Alert type="error" showIcon message="Could not create the intake" description={error} />}
+      <span className="eyebrow">新建科研会话</span>
+      <h1>您想复现什么研究？</h1>
+      <p className="welcome-copy">提交论文、实现仓库和科研目标。ReproPilot 会在开始执行前分析并确认实验范围。</p>
+      {error && <Alert type="error" showIcon message="无法创建复现任务" description={error} />}
       <Form form={form} layout="vertical" onFinish={submit} requiredMark={false} className="intake-form">
-        <Form.Item label="Paper PDF" required>
+        <Form.Item label="论文 PDF" required>
           <Upload.Dragger
             accept="application/pdf,.pdf"
             maxCount={1}
@@ -36,26 +36,26 @@ export function NewReproductionForm({ loading, error, onSubmit }: Props) {
             onRemove={() => { setFiles([]); return true; }}
           >
             <FilePdfOutlined className="upload-icon" />
-            <div className="upload-title">Drop the paper here or browse</div>
-            <div className="upload-hint">PDF · up to 50 MB</div>
+            <div className="upload-title">将论文拖到此处，或点击选择文件</div>
+            <div className="upload-hint">PDF · 最大 50 MB</div>
           </Upload.Dragger>
         </Form.Item>
         <Form.Item
-          label="GitHub repository"
+          label="GitHub 仓库"
           name="repositoryUrl"
           rules={[
-            { required: true, message: "Enter the repository URL" },
-            { pattern: /^https:\/\/github\.com\/[^/]+\/[^/?#]+(?:\.git)?$/, message: "Use a credential-free GitHub HTTPS URL" },
+            { required: true, message: "请输入仓库地址" },
+            { pattern: /^https:\/\/github\.com\/[^/]+\/[^/?#]+(?:\.git)?$/, message: "请使用不含凭据的 GitHub HTTPS 地址" },
           ]}
         >
           <Input size="large" prefix={<GithubOutlined />} placeholder="https://github.com/organization/repository" />
         </Form.Item>
         <Form.Item
-          label="Reproduction goal"
+          label="复现目标"
           name="goal"
-          rules={[{ required: true, whitespace: true, message: "Describe what you want to reproduce" }]}
+          rules={[{ required: true, whitespace: true, message: "请描述您希望复现的内容" }]}
         >
-          <Input.TextArea rows={4} maxLength={10_000} showCount placeholder="For example: reproduce the main experiment and all ablations." />
+          <Input.TextArea rows={4} maxLength={10_000} showCount placeholder="例如：复现主要实验及全部消融实验。" />
         </Form.Item>
         <Button
           type="primary"
@@ -66,7 +66,7 @@ export function NewReproductionForm({ loading, error, onSubmit }: Props) {
           icon={<SendOutlined />}
           block
         >
-          Analyze paper and repository
+          分析论文与仓库
         </Button>
       </Form>
     </div>

@@ -16,6 +16,6 @@
 
 ## Validation
 
-- Keep `tests/unit` independent of Docker, GPU, OpenHands, network, and model credentials.
-- Run `python -m compileall backend tests` and `python -m unittest discover -s tests/unit -v` for local structural changes.
-- Linux Docker/GPU integration tests belong to the later integration phase and must be explicitly marked.
+- Run `python -m compileall backend` for backend structural changes.
+- Run `pnpm run build` from `frontend/` for frontend changes.
+- Linux Docker/GPU integration validation belongs to the deployment environment and must be run explicitly.

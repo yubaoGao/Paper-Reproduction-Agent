@@ -20,10 +20,10 @@ function routeSelection(pathname: string): { intakeId?: string; jobId?: string }
 function errorMessage(error: unknown): string | undefined {
   if (!error) return undefined;
   if (error instanceof ApiError && error.status === 403) {
-    return "This reproduction belongs to another principal. Switch back to its owner or open one of your own sessions.";
+    return "此复现任务属于其他用户。请切换回任务所属用户，或打开您自己的会话。";
   }
   if (error instanceof Error) return error.message;
-  return "An unexpected API error occurred.";
+  return "发生了意外的 API 错误。";
 }
 
 function activeJob(jobFromRoute: JobDetail | undefined, intakeJob: JobDetail | undefined): JobDetail | undefined {
@@ -129,10 +129,10 @@ export default function App() {
   const currentError = actionError ?? errorMessage(routeError);
   const actionLoading = clarifyMutation.isPending || resourceMutation.isPending || startMutation.isPending || cancelMutation.isPending;
   const gpuSummary = job?.waiting_reason
-    ? "Waiting"
+    ? "等待分配"
     : job?.gpu_allocation
-      ? "Allocated"
-      : "Backend managed";
+      ? "已分配"
+      : "后端管理";
 
   const applyPrincipal = () => {
     const normalized = principalDraft.trim();
@@ -146,13 +146,13 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="global-header">
-        <button className="brand" onClick={() => navigate("/")} aria-label="ReproPilot home">
+        <button className="brand" onClick={() => navigate("/")} aria-label="ReproPilot 首页">
           <span className="brand-mark"><ExperimentOutlined /></span>
-          <span><strong>ReproPilot</strong><small>Scientific reproduction workspace</small></span>
+          <span><strong>ReproPilot</strong><small>科研复现工作台</small></span>
         </button>
         <div className="global-signals">
-          <Tooltip title={jobsQuery.isError ? "API unavailable" : "Task 16 API reachable"}>
-            <span className={`signal ${jobsQuery.isError ? "danger" : "healthy"}`}><CloudServerOutlined /> Server {jobsQuery.isError ? "offline" : "online"}</span>
+          <Tooltip title={jobsQuery.isError ? "API 服务不可用" : "API 服务连接正常"}>
+            <span className={`signal ${jobsQuery.isError ? "danger" : "healthy"}`}><CloudServerOutlined /> 服务{jobsQuery.isError ? "离线" : "在线"}</span>
           </Tooltip>
           <span className="signal"><span className="gpu-glyph">GPU</span> {gpuSummary}</span>
           <div className="principal-control">
@@ -162,13 +162,13 @@ export default function App() {
               onChange={(event) => setPrincipalDraft(event.target.value)}
               onBlur={applyPrincipal}
               onPressEnter={applyPrincipal}
-              aria-label="Current principal"
+              aria-label="当前用户"
               variant="borderless"
             />
           </div>
         </div>
       </header>
-      {jobsQuery.isError && <Alert className="server-alert" banner type="warning" message="The Task 16 API is unavailable. Existing browser state is preserved; background jobs are not controlled by this page." />}
+      {jobsQuery.isError && <Alert className="server-alert" banner type="warning" message="API 服务暂不可用。浏览器中的现有状态已保留，但此页面目前无法控制后台任务。" />}
       <div className="workspace-grid">
         <TaskHistory
           jobs={jobsQuery.data ?? []}
@@ -203,8 +203,8 @@ export default function App() {
           resultsLoading={resultsQuery.isLoading || comparisonQuery.isLoading}
         />
       </div>
-      <footer className="mobile-context">Three-panel research workspace · widen the window for the full inspector.</footer>
-      <span className="sr-only">Current queue state: {humanize(job?.state)}</span>
+      <footer className="mobile-context">三栏科研工作台 · 加宽窗口可查看完整任务详情。</footer>
+      <span className="sr-only">当前队列状态：{humanize(job?.state)}</span>
     </div>
   );
 }

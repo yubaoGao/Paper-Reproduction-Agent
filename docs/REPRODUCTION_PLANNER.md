@@ -35,15 +35,7 @@ Production selected-paper-experiment path 还必须拥有 resolved `EvaluationPo
 离线检查：
 
 ```powershell
-python -m compileall backend tests
-python -m unittest discover -s tests/unit -v
+python -m compileall backend
 ```
 
-真实 provider smoke test 为 opt-in，并要求两个固定角色的凭据：
-
-```powershell
-$env:REPRODUCTION_PLANNER_INTEGRATION="1"
-$env:DEEPSEEK_API_KEY="..."
-$env:DASHSCOPE_API_KEY="..."
-python -m unittest tests.integration.test_reproduction_planner_deepseek -v
-```
+真实 provider smoke test 不随生产源码仓库分发，应在隔离的验证环境中运行，并通过环境变量注入两个固定角色的凭据。

@@ -25,7 +25,13 @@ python -m backend.app.worker
 The API and worker share no Python objects. Both reconstruct state from the
 database, while the worker alone owns GPU and sandbox adapters. A production
 worker requires a digest-pinned base image, an explicit quota-capable Docker
-volume driver, and live NVIDIA inventory. It never requests all GPUs.
+volume driver, live NVIDIA inventory, and `REPROPILOT_DATA_ROOT` pointing at an
+existing data directory whose descendants may be registered as HOST_PATH mounts.
+It never requests all GPUs.
+
+`REPROPILOT_DATA_ROOT` is the sandbox host-bind allowlist, for example
+`/home/gyb/ReproPilotData`. It is not the application checkout
+(`/home/gyb/ReproPilot`) and must not be `/`, `/home`, or `/etc`.
 
 `REPROPILOT_PRINCIPAL_RESOURCE_ROOTS_JSON` must list each principal's approved
 dataset/config roots when local resources can be submitted. The API persists
@@ -34,8 +40,7 @@ downloads missing datasets automatically.
 
 Result interpretation fails closed. `build_production_worker(result_adapters=...)`
 must receive adapters keyed by exact repository ID; an unknown repository is
-not treated as supported. The only reference adapter is under
-`tests/fixtures/reference_reproduction` and is intentionally unavailable to
+not treated as supported. Reference adapters are intentionally unavailable to
 production composition.
 
 The deterministic integration suite uses test persistence and a test GPU

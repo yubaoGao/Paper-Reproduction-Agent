@@ -94,8 +94,8 @@ PaperDocument → PaperExperimentCatalog → ReproductionSpecification
 
 文档示例（不是 production hardcode）：MVSA-S 上的 DMSF Full Model 是 MAIN experiment，Table 2 声明 Accuracy=0.7533、F1=0.7531；`w/o Center Loss` 是指向 Full Model 的 ABLATION record。每个值都携带 `table:2/row:DMSF/column:Accuracy` 一类稳定 locator。
 
-## 测试与真实 API
+## 真实 API 验证
 
-普通 unit tests 使用仅位于 `tests/` 的 `ScriptedClient`，不访问 API。`pytest.ini` 声明 `deepseek_integration` 和 `qwen_integration` marker；真实测试还要求 `RUN_LLM_INTEGRATION=1` 及对应 API key。Qwen integration 同时测试 structured text 和 image input。Trace、异常和测试输出都不得保存 secret。
+真实 DeepSeek/Qwen 验证不随生产源码仓库分发，应在隔离环境中显式运行并通过环境变量注入 API key。Trace、异常和验证输出都不得保存 secret。
 
 本 Task 不实现 Repository Analyzer、Git clone/index、Paper-Code Alignment、Planner、ExperimentSpecification generation、Curie integration、Docker、GPU Scheduler、数据库、队列、FastAPI、React 或 Result Comparator。

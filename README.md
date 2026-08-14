@@ -40,8 +40,10 @@ Docling 首次运行可能下载模型权重；生产环境应在构建/部署�
 ## Windows 本地检查
 
 ```powershell
-python -m compileall backend tests
-python -m unittest discover -s tests/unit -v
+python -m compileall backend
+Set-Location frontend
+pnpm install --frozen-lockfile
+pnpm run build
 ```
 
 ## 文档

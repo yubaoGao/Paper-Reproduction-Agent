@@ -30,13 +30,29 @@ No Docker Socket / Host RW / Host Python mutation
 `SandboxSpec` 只保存 trusted resource ID 和容器内路径，不保存 Agent 提供的 host bind source。`TrustedResourceRegistry` 在 infrastructure 层解析真实路径；`HostMutationGuard` 在 Docker create 之前确定性拒绝：
 
 - 未注册资源、任意 host bind、shared resource RW mount；
-- `/`、`/home`、`/etc`、`/usr`、`/opt`、`/var/run`、Docker/containerd/CRI socket、credential/config 目录；
+- `/`、`/home`（目录本身）、`/etc` 及其子树、`/usr` 及其子树、`/opt` 及其子树、`/var/run`、`/var/lib/docker`、Docker/containerd/CRI socket、credential/config 目录；
+- 不在已配置 allowed host root（`REPROPILOT_DATA_ROOT` 的严格子路径）内的 HOST_PATH；
 - `privileged`、host network/PID/IPC、root UID、writable rootfs；
 - capability 未 drop ALL、缺少 no-new-privileges、unconfined seccomp；
 - mutable image tag、all-GPU、重复 mount target、path traversal；
 - 未经管理员注册和标记的 egress network。
 
 实验阶段使用 non-root `65532:65532`、read-only rootfs、Docker default 或管理员审核 seccomp、private namespaces、PID/CPU/memory/swap/SHM limits。`/workspace`、`/sandbox-env`、`/cache`、`/output` 是当前 run 独占、quota volume driver 管理的 volume；`/tmp` 与 `/home/sandbox` 是受限 tmpfs。生产启动必须配置支持配额且能设置 UID/GID 的 Docker volume driver，否则 manager 明确拒绝创建 volume。
+
+## Allowed host roots
+
+HOST_PATH bind 必须同时满足：已在 `TrustedResourceRegistry` 注册、解析后不是危险系统路径、并且是 bootstrap 注入的 `allowed_host_roots` 的**严格子目录**（不能直接挂整个 data root）。生产 worker 从 `REPROPILOT_DATA_ROOT` 读取该 root，例如 `/home/gyb/ReproPilotData`。未配置时 fail-closed：拒绝一切 host bind。`/home` 本身仍禁止；`/home/...` 是否允许只由 allowed root 决定，不会因为位于 `/home` 下就自动放行或自动拒绝。
+
+不要把 `REPROPILOT_DATA_ROOT` 设为 `/`、`/home`、`/etc` 或用户家目录本身。实验室部署应提前创建：
+
+```text
+$REPROPILOT_DATA_ROOT/repositories
+$REPROPILOT_DATA_ROOT/datasets
+$REPROPILOT_DATA_ROOT/checkpoints
+$REPROPILOT_DATA_ROOT/runs
+$REPROPILOT_DATA_ROOT/artifacts
+$REPROPILOT_DATA_ROOT/cache
+```
 
 ## Workspace、Dataset 与 Checkpoint
 

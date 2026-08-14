@@ -32,6 +32,7 @@ from backend.app.infrastructure.sandbox import (
     RunLogStore,
     RunResourceRegistry,
     SandboxArtifactCollectionAdapter,
+    SandboxPolicyViolation,
     SandboxRuntimeService,
     SandboxSessionRegistry,
     TrustedResourceRegistry,
@@ -134,18 +135,23 @@ def build_production_worker(
     base_image_digest: str | None = None,
     run_log_root: str | Path | None = None,
     docker_volume_driver: str | None = None,
+    allowed_host_roots=None,
 ):
     """Build a real worker. No Fake, in-memory persistence, or legacy runtime."""
     url = database_url or os.environ.get("REPROPILOT_DATABASE_URL")
     image = base_image_digest or os.environ.get("REPROPILOT_BASE_IMAGE_DIGEST")
     log_root = run_log_root or os.environ.get("REPROPILOT_RUN_LOG_ROOT")
     volume_driver = docker_volume_driver or os.environ.get("REPROPILOT_DOCKER_VOLUME_DRIVER")
+    data_root = None if allowed_host_roots is not None else (
+        (os.environ.get("REPROPILOT_DATA_ROOT") or "").strip() or None
+    )
     missing = [
         name for name, value in (
             ("REPROPILOT_DATABASE_URL", url),
             ("REPROPILOT_BASE_IMAGE_DIGEST", image),
             ("REPROPILOT_RUN_LOG_ROOT", log_root),
             ("REPROPILOT_DOCKER_VOLUME_DRIVER", volume_driver),
+            ("REPROPILOT_DATA_ROOT", data_root if allowed_host_roots is None else "configured"),
         ) if not value
     ]
     if missing:
@@ -183,10 +189,21 @@ def build_production_worker(
                 "inter_container_communication": False,
             },
         ))
+    host_roots = (
+        allowed_host_roots
+        if allowed_host_roots is not None
+        else (data_root,)
+    )
+    try:
+        mutation_guard = HostMutationGuard(trusted, allowed_host_roots=host_roots)
+    except (OSError, SandboxPolicyViolation) as exc:
+        raise RuntimeError(
+            "REPROPILOT_DATA_ROOT must be an existing directory that is not a forbidden system path"
+        ) from exc
     backend = DockerEngineBackend(quota_volume_driver=volume_driver)
     manager = LinuxSandboxManager(
         backend,
-        HostMutationGuard(trusted),
+        mutation_guard,
         RunResourceRegistry(),
     )
     sandbox_sessions = SandboxSessionRegistry()

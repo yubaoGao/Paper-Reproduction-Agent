@@ -20,13 +20,13 @@ class SandboxPolicyViolation(ValueError):
     pass
 
 
-_DANGEROUS_HOST_ROOTS = {
-    "/",
+# Self and descendants are always forbidden, even if configured as an allowed root.
+# "/" is exact-only: it is a parent of every absolute POSIX path.
+_DANGEROUS_SYSTEM_TREES = {
     "/bin",
     "/boot",
     "/dev",
     "/etc",
-    "/home",
     "/lib",
     "/lib64",
     "/opt",
@@ -38,6 +38,10 @@ _DANGEROUS_HOST_ROOTS = {
     "/usr",
     "/var/run",
     "/var/lib/docker",
+}
+# Broad user/home mounts are exact-only. Descendants are decided by allowed roots.
+_BROAD_EXACT_MOUNTS = {
+    "/home",
 }
 _FORBIDDEN_SOCKET_SUFFIXES = (
     "/docker.sock",
@@ -85,6 +89,33 @@ def is_within(path: str, roots: tuple[str, ...]) -> bool:
     return any(candidate == _container_path(root) or _container_path(root) in candidate.parents for root in roots)
 
 
+def _posix_host_path(path: Path) -> PurePosixPath:
+    text = path.as_posix().rstrip("/") or "/"
+    return PurePosixPath(text)
+
+
+def is_forbidden_host_path(path: Path) -> bool:
+    """Return True if a resolved host path is a forbidden system or broad mount."""
+    candidate = _posix_host_path(path)
+    if candidate == PurePosixPath("/"):
+        return True
+    if candidate in {PurePosixPath(item) for item in _BROAD_EXACT_MOUNTS}:
+        return True
+    return any(
+        candidate == PurePosixPath(root) or PurePosixPath(root) in candidate.parents
+        for root in _DANGEROUS_SYSTEM_TREES
+    )
+
+
+def is_strict_descendant(path: Path, root: Path) -> bool:
+    """Return True if path is inside root after pathlib containment, not equal to it."""
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return False
+    return bool(relative.parts)
+
+
 class HostMutationGuard:
     """Resolve only registered resources and reject dangerous host exposure."""
 
@@ -92,9 +123,11 @@ class HostMutationGuard:
         self,
         resources: TrustedResourceRegistry,
         *,
+        allowed_host_roots: tuple[str | Path, ...] = (),
         host_mount_points: tuple[str, ...] | None = None,
     ) -> None:
         self.resources = resources
+        self.allowed_host_roots = self._normalize_allowed_host_roots(allowed_host_roots)
         self.host_mount_points = (
             host_mount_points
             if host_mount_points is not None
@@ -172,16 +205,30 @@ class HostMutationGuard:
         return resource.network_name
 
     @staticmethod
-    def _validate_host_path(source: str) -> None:
+    def _normalize_allowed_host_roots(roots: tuple[str | Path, ...]) -> tuple[Path, ...]:
+        normalized = []
+        for root in roots:
+            path = Path(root).resolve(strict=True)
+            if not path.is_dir():
+                raise SandboxPolicyViolation("allowed host root must be a directory")
+            if is_forbidden_host_path(path):
+                raise SandboxPolicyViolation("allowed host root is a forbidden system path")
+            normalized.append(path)
+        return tuple(normalized)
+
+    def _validate_host_path(self, source: str) -> None:
         resolved = Path(source).resolve(strict=True)
-        normalized = resolved.as_posix().rstrip("/") or "/"
-        folded = normalized.casefold()
-        if any(
-            normalized == root or normalized.startswith(root + "/")
-            for root in _DANGEROUS_HOST_ROOTS
-            if root != "/"
-        ) or normalized == "/":
+        folded = resolved.as_posix().casefold()
+        if is_forbidden_host_path(resolved):
             raise SandboxPolicyViolation("dangerous broad host mount is forbidden")
+        if not self.allowed_host_roots:
+            raise SandboxPolicyViolation(
+                "host bind mounts require a configured allowed host root"
+            )
+        if not any(is_strict_descendant(resolved, root) for root in self.allowed_host_roots):
+            raise SandboxPolicyViolation(
+                "host path is outside the configured allowed host roots"
+            )
         if any(folded.endswith(item) for item in _FORBIDDEN_SOCKET_SUFFIXES):
             raise SandboxPolicyViolation("container runtime sockets are forbidden")
         if any(part.casefold() in {".ssh", ".aws", ".config"} for part in resolved.parts):

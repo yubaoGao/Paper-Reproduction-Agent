@@ -11,5 +11,5 @@ const colors = {
 
 export function StatusPill({ status }: { status?: string | null }) {
   const tone = statusTone(status ?? undefined);
-  return <Tag color={colors[tone]} bordered={false}>{humanize(status)}</Tag>;
+  return <Tag className="status-pill" color={colors[tone]} bordered={false}>{humanize(status)}</Tag>;
 }

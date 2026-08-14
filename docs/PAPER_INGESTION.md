@@ -74,8 +74,8 @@ URL 策略默认只允许 HTTPS；必须显式配置才能允许 HTTP。每个�
 
 `PaperIngestionSettings` 集中定义最大文件大小（默认 50 MiB）、最大页数（500）、解析 timeout（300 秒）、下载 timeout（20 秒）、redirect 上限、OCR 策略和图片目录。Docling 直接接收 file/page/`document_timeout` 限制；pypdf 每页检查 deadline。同步 service 适合由未来作业 worker 调用，不得直接放入同步 HTTP handler。
 
-## 测试
+## 验证
 
-`tests/unit/test_paper_ingestion.py` 覆盖领域校验、locator、native-text 多页 PDF、损坏 PDF、fallback/partial policy、四种 source、upload stream、协议/localhost/private IP/redirect、大小、Content-Type、magic header，以及 Docling IR 映射中的 OCR、典型 AI table、section 和 figure artifact。网络均为 fake transport，单元测试不依赖网络、Docling、OCR backend、Docker 或 GPU。
+生产源码可通过 `python -m compileall backend` 做结构检查。
 
-完整 Docling 模型推理和扫描 PDF OCR 属于显式的本机/CI integration profile，需要安装依赖和模型权重后执行；它不是 fake production implementation。启用方式为 `$env:PAPER_INGESTION_INTEGRATION='1'; python -m unittest tests.integration.test_docling_ocr -v`。当前仓库不包含 Experiment Extraction Agent、LLM prompt、FastAPI、数据库、调度器或 Web 前端。
+完整 Docling 模型推理和扫描 PDF OCR 应在显式的本机或 CI 验证环境中执行，需要安装依赖和模型权重；它不是 fake production implementation。

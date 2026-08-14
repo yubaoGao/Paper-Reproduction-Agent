@@ -24,7 +24,13 @@ from .openhands import (
     OpenHandsExecutionError,
     SandboxedOpenHandsController,
 )
-from .policy import HostMutationGuard, SandboxPathGuard, SandboxPolicyViolation
+from .policy import (
+    HostMutationGuard,
+    SandboxPathGuard,
+    SandboxPolicyViolation,
+    is_forbidden_host_path,
+    is_strict_descendant,
+)
 from .probe import SandboxEnvironmentProbe
 from .provisioner import EnvironmentProvisioner, EnvironmentProvisioningError
 from .registry import RunResourceRegistry, TrustedResourceRegistry

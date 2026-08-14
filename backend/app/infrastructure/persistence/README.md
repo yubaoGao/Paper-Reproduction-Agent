@@ -14,14 +14,8 @@ python -m alembic -c alembic.ini upgrade head
 Production startup must not call `metadata.create_all()`. Artifact rows contain
 references and metadata only; artifact file bytes remain in external storage.
 
-Real integration tests require an isolated PostgreSQL database:
-
-```powershell
-$env:REPROPILOT_TEST_POSTGRES_DSN = 'postgresql+psycopg://user:password@host/test_database'
-python -m unittest tests.integration.test_postgres_persistence -v
-```
-
-The integration test creates and removes one uniquely named schema.
+Database integration validation should run against an isolated PostgreSQL
+database outside the production source tree.
 
 ## Durable queue
 
