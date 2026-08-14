@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from urllib.parse import urlsplit
-
 from fastapi import APIRouter, Depends, File, Form, Header, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
@@ -11,6 +9,7 @@ from .auth import Principal
 from .dependencies import get_api_service, get_principal
 from .presenters import present_intake, present_job
 from .schemas import ClarificationRequest, IntakeResponse, JobSummaryResponse, ResourceSubmissionRequest
+from .github_repository_url import GitHubRepositoryUrlError, normalize_github_repository_url
 from .sse import stream_job_events
 
 
@@ -31,18 +30,12 @@ async def _read_bounded_upload(upload: UploadFile, maximum_bytes: int) -> bytes:
         chunks.append(chunk)
 
 
-def _credential_free_repository_url(value: str) -> str:
-    parsed = urlsplit(value)
-    if (
-        parsed.scheme != "https" or not parsed.hostname
-        or parsed.username or parsed.password or parsed.query or parsed.fragment
-    ):
+def _github_repository_url(value: str) -> str:
+    try:
+        return normalize_github_repository_url(value)
+    except GitHubRepositoryUrlError as exc:
         from fastapi import HTTPException
-        raise HTTPException(
-            status_code=422,
-            detail="repository_url must be credential-free HTTPS without query or fragment",
-        )
-    return value
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/intakes", response_model=IntakeResponse, status_code=201)
@@ -55,7 +48,7 @@ async def create_intake(
     service=Depends(get_api_service),
 ):
     # Bounded upload ingestion remains delegated to Task 05 through the pipeline.
-    repository_url = _credential_free_repository_url(repository_url)
+    repository_url = _github_repository_url(repository_url)
     content = await _read_bounded_upload(paper_pdf, request.app.state.max_paper_upload_bytes)
     return present_intake(service.create_intake(
         principal=principal.principal_id,

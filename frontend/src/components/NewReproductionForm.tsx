@@ -2,6 +2,7 @@ import { useState } from "react";
 import { FilePdfOutlined, GithubOutlined, SendOutlined } from "@ant-design/icons";
 import { Alert, Button, Form, Input, Upload } from "antd";
 import type { UploadFile } from "antd";
+import { GitHubRepositoryUrlError, normalizeGitHubRepositoryUrl } from "../utils/githubRepositoryUrl";
 
 interface Props {
   loading: boolean;
@@ -15,7 +16,13 @@ export function NewReproductionForm({ loading, error, onSubmit }: Props) {
 
   const submit = (values: { repositoryUrl: string; goal: string }) => {
     const pdf = files[0]?.originFileObj;
-    if (pdf) onSubmit({ pdf, ...values });
+    if (pdf) {
+      onSubmit({
+        pdf,
+        repositoryUrl: normalizeGitHubRepositoryUrl(values.repositoryUrl),
+        goal: values.goal,
+      });
+    }
   };
 
   return (
@@ -44,8 +51,22 @@ export function NewReproductionForm({ loading, error, onSubmit }: Props) {
           label="GitHub 仓库"
           name="repositoryUrl"
           rules={[
-            { required: true, message: "请输入仓库地址" },
-            { pattern: /^https:\/\/github\.com\/[^/]+\/[^/?#]+(?:\.git)?$/, message: "请使用不含凭据的 GitHub HTTPS 地址" },
+            { required: true, whitespace: true, message: "请输入仓库地址" },
+            {
+              validator: async (_rule, value: string) => {
+                if (value == null || String(value).trim() === "") {
+                  return;
+                }
+                try {
+                  normalizeGitHubRepositoryUrl(String(value));
+                } catch (error) {
+                  const message = error instanceof GitHubRepositoryUrlError
+                    ? error.message
+                    : "请输入仓库主页地址，例如 https://github.com/owner/repo";
+                  throw new Error(message);
+                }
+              },
+            },
           ]}
         >
           <Input size="large" prefix={<GithubOutlined />} placeholder="https://github.com/organization/repository" />
