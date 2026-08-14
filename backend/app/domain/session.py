@@ -45,10 +45,10 @@ class ReproductionSession(DomainModel):
     paper_content_hash: NonEmptyStr
     paper_document: PaperDocument | None = None
     paper_catalog: PaperExperimentCatalog
-    repository_catalog: RepositoryAnalysisCatalog
-    alignment_catalog: PaperCodeAlignmentCatalog
-    repository_snapshot_id: NonEmptyStr
-    repository_commit_sha: NonEmptyStr
+    repository_catalog: RepositoryAnalysisCatalog | None = None
+    alignment_catalog: PaperCodeAlignmentCatalog | None = None
+    repository_snapshot_id: NonEmptyStr | None = None
+    repository_commit_sha: NonEmptyStr | None = None
     status: ReproductionSessionStatus = ReproductionSessionStatus.ACTIVE
     pending_goal: NonEmptyStr | None = None
     pending_goal_resolution: GoalResolutionResult | None = None
@@ -75,14 +75,23 @@ class ReproductionSession(DomainModel):
                 raise ValueError("session paper document does not match the experiment catalog")
             if self.paper_document.content_hash != self.paper_content_hash:
                 raise ValueError("session paper content hash does not match the stored document")
-        if self.repository_catalog.snapshot_id != self.repository_snapshot_id:
-            raise ValueError("session repository catalog snapshot differs from the locked snapshot")
-        if self.repository_catalog.resolved_commit_sha != self.repository_commit_sha:
-            raise ValueError("session repository catalog commit differs from the locked commit")
-        if self.alignment_catalog.repository_snapshot_id != self.repository_snapshot_id:
-            raise ValueError("session alignment catalog snapshot differs from the locked snapshot")
-        if self.alignment_catalog.resolved_commit_sha != self.repository_commit_sha:
-            raise ValueError("session alignment catalog commit differs from the locked commit")
+        if self.repository_catalog is None:
+            if self.repository_snapshot_id is not None or self.repository_commit_sha is not None:
+                raise ValueError("session snapshot identity requires a repository catalog")
+            if self.alignment_catalog is not None:
+                raise ValueError("alignment catalog requires a repository catalog")
+        else:
+            if self.repository_snapshot_id is None or self.repository_commit_sha is None:
+                raise ValueError("session with a repository catalog requires a locked snapshot")
+            if self.repository_catalog.snapshot_id != self.repository_snapshot_id:
+                raise ValueError("session repository catalog snapshot differs from the locked snapshot")
+            if self.repository_catalog.resolved_commit_sha != self.repository_commit_sha:
+                raise ValueError("session repository catalog commit differs from the locked commit")
+            if self.alignment_catalog is not None:
+                if self.alignment_catalog.repository_snapshot_id != self.repository_snapshot_id:
+                    raise ValueError("session alignment catalog snapshot differs from the locked snapshot")
+                if self.alignment_catalog.resolved_commit_sha != self.repository_commit_sha:
+                    raise ValueError("session alignment catalog commit differs from the locked commit")
         if (
             self.pending_resource_resolution is not None
             and self.pending_resource_resolution.principal != self.owner_principal

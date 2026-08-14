@@ -20,8 +20,8 @@ class ReproductionSessionRow(PersistenceBase):
     owner_principal: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     origin_intake_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    repository_snapshot_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    repository_commit_sha: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    repository_snapshot_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    repository_commit_sha: Mapped[str | None] = mapped_column(String(64), index=True)
     paper_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     session_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -247,6 +247,38 @@ class ExternalResourceBindingRow(PersistenceBase):
     shared: Mapped[bool] = mapped_column(nullable=False, default=False, index=True)
     validation_status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     binding_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class IntakeAnalysisJobRow(PersistenceBase):
+    __tablename__ = "intake_analysis_jobs"
+    __table_args__ = (
+        Index("ix_intake_analysis_jobs_queue_order", "status", "enqueued_at", "job_id"),
+    )
+
+    job_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    intake_id: Mapped[str] = mapped_column(
+        ForeignKey("reproduction_intakes.intake_id", ondelete="CASCADE"), nullable=False, unique=True, index=True,
+    )
+    owner_principal: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    paper_artifact_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    worker_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    lease_token: Mapped[str | None] = mapped_column(String(64))
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    enqueued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_error_code: Mapped[str | None] = mapped_column(String(64))
+    analysis_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    llm_call_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lifetime_llm_call_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    job_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 

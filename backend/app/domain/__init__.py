@@ -127,6 +127,12 @@ from .reproduction_run import (
     PatchRecord, PatchStatus, ReproductionRun, RunManifest, StepRun, StepStatus,
     ValidationPhase, ValidationRecord,
 )
+from .analysis import (
+    ANALYSIS_ARTIFACT_STORE_FAILED, ANALYSIS_ENQUEUE_FAILED, ANALYSIS_FAILED,
+    ANALYSIS_LLM_BUDGET_EXCEEDED, ANALYSIS_TIMEOUT, GOAL_NOT_FOUND,
+    REPOSITORY_SNAPSHOT_MISSING,
+    AnalysisJobStatus, IntakeAnalysisJob, IntakeAnalysisPhase,
+)
 from .product_events import (
     ReproductionEvent, ReproductionEventType, ReproductionIntake,
     ReproductionIntakeState,
@@ -224,6 +230,10 @@ __all__ = [
     "ArtifactReference","AttemptRecord","AttemptStatus","FailureCategory","FailureRecord",
     "PatchRecord","PatchStatus","ReproductionRun","RunManifest","StepRun","StepStatus",
     "ValidationPhase","ValidationRecord",
+    "ANALYSIS_ARTIFACT_STORE_FAILED","ANALYSIS_ENQUEUE_FAILED","ANALYSIS_FAILED",
+    "ANALYSIS_LLM_BUDGET_EXCEEDED","ANALYSIS_TIMEOUT","GOAL_NOT_FOUND",
+    "REPOSITORY_SNAPSHOT_MISSING",
+    "AnalysisJobStatus","IntakeAnalysisJob","IntakeAnalysisPhase",
     "ReproductionEvent","ReproductionEventType","ReproductionIntake",
     "ReproductionIntakeState",
     "ExperimentJobHistoryItem","ReproductionSession","ReproductionSessionStatus",

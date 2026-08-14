@@ -4,7 +4,7 @@ import json
 from collections import Counter
 from datetime import datetime,timezone
 from backend.app.domain import AlignmentAnalysisStatus,AlignmentTrace
-from backend.app.llm import LLMRole,LLMRouter
+from backend.app.llm import ANALYSIS_CONTROL_FLOW_ERRORS,LLMProviderError,LLMRole,LLMRouter,StructuredOutputError
 from backend.app.services import AlignmentSettings,PaperCodeAlignmentError
 from .candidates import AlignmentCandidateGenerator
 from .catalog import AlignmentCatalogMerger,PaperCodeAlignmentValidator
@@ -24,6 +24,8 @@ class PaperCodeAlignmentAgent:
             candidates=self.candidates.generate(paper_catalog,repository_catalog);deterministic=self.deterministic.build(paper_catalog,repository_catalog,candidates)
             for stage_name in self.STAGES:
                 try:context=self.context.build(stage_name,paper_catalog,repository_catalog,candidates,deterministic,reproduction_specification);calls.extend(context.llm_metadata);selected.extend(context.selected_contexts)
+                except ANALYSIS_CONTROL_FLOW_ERRORS:
+                    raise
                 except Exception as exc:missing.append(stage_name);warnings.append(f"{stage_name} context failed: {exc}");continue
                 value,stage_calls,count,error=self._stage(stage_name,context,paper_catalog,repository_catalog,paper_document,repository_snapshot,static_analysis);calls.extend(stage_calls);repairs+=count
                 if value is None:missing.append(stage_name);warnings.append(error or f"{stage_name} failed")
@@ -35,17 +37,25 @@ class PaperCodeAlignmentAgent:
             finished=datetime.now(timezone.utc);counts=Counter(x.category for x in candidates)
             trace=AlignmentTrace(alignment_id=f"alignment:{catalog.catalog_id}",paper_catalog_id=paper_catalog.catalog_id,repository_snapshot_id=repository_catalog.snapshot_id,resolved_commit_sha=repository_catalog.resolved_commit_sha,started_at=started,finished_at=finished,candidate_counts=dict(counts),selected_contexts=tuple(dict.fromkeys(selected)),primary_calls=sum(x.role is LLMRole.PRIMARY for x in calls),fast_calls=sum(x.role is LLMRole.FAST for x in calls),repair_attempts=repairs,prompt_versions={x:"v1" for x in ("candidate_classification","stage_alignment","repair","catalog_review")},usage=tuple(x.model_dump(mode="json") for x in calls),warnings=catalog.alignment_metadata.warnings,status=catalog.alignment_status)
             return AlignmentResult(catalog=catalog,trace=trace)
+        except ANALYSIS_CONTROL_FLOW_ERRORS:
+            raise
         except PaperCodeAlignmentError:raise
         except Exception as exc:raise PaperCodeAlignmentError(f"paper-code alignment failed: {exc}") from exc
     def _stage(self,name,context,paper,repository,paper_document,snapshot,static):
         calls=[];repairs=0;issue="";payload=json.dumps([x.model_dump() for x in context.items],ensure_ascii=False);prompt=self.prompts.get("stage_alignment")
         try:
             response=self.router.for_role(LLMRole.PRIMARY).generate_structured(role=LLMRole.PRIMARY,system_prompt=prompt.system,content=f"{prompt.task}\nSTAGE: {name}\nUNTRUSTED BOUNDED CONTEXT:\n{payload}",output_schema=AlignmentStageExtraction,prompt_name=prompt.name,prompt_version=prompt.version);calls.append(response.metadata);self._validate_stage(response.value,paper,repository,paper_document,snapshot,static);return response.value,calls,repairs,None
+        except ANALYSIS_CONTROL_FLOW_ERRORS:
+            raise
+        except (LLMProviderError, StructuredOutputError) as exc:return None,calls,repairs,str(exc)
         except Exception as exc:issue=str(exc)
         for attempt in range(self.settings.max_repair_attempts):
             repairs+=1;role=LLMRole.FAST if attempt==0 else LLMRole.PRIMARY;prompt=self.prompts.get("repair")
             try:
                 response=self.router.for_role(role).generate_structured(role=role,system_prompt=prompt.system,content=f"{prompt.task}\nSTAGE: {name}\nVALIDATION ISSUE: {issue}\nUNTRUSTED BOUNDED CONTEXT:\n{payload}",output_schema=AlignmentStageExtraction,prompt_name=prompt.name,prompt_version=prompt.version);calls.append(response.metadata);self._validate_stage(response.value,paper,repository,paper_document,snapshot,static);return response.value,calls,repairs,None
+            except ANALYSIS_CONTROL_FLOW_ERRORS:
+                raise
+            except (LLMProviderError, StructuredOutputError) as exc:return None,calls,repairs,str(exc)
             except Exception as exc:issue=str(exc)
         return None,calls,repairs,f"{name} retry exhaustion: {issue}"
     def _validate_stage(self,stage,paper,repository,paper_document,snapshot,static):
@@ -60,4 +70,6 @@ class PaperCodeAlignmentAgent:
             if not response.value.valid or response.value.missing_components:
                 missing=tuple(dict.fromkeys((*catalog.alignment_metadata.missing_components,*(response.value.missing_components or ("catalog_review_validation",)))));catalog=catalog.model_copy(update={"alignment_status":AlignmentAnalysisStatus.PARTIAL,"alignment_metadata":catalog.alignment_metadata.model_copy(update={"missing_components":missing,"warnings":tuple(dict.fromkeys((*catalog.alignment_metadata.warnings,*response.value.warnings)))})})
             return catalog,[response.metadata],None
+        except ANALYSIS_CONTROL_FLOW_ERRORS:
+            raise
         except Exception as exc:return catalog,[],f"catalog review unavailable: {exc}"

@@ -8,8 +8,13 @@ import { formatTime, humanize, numberValue, stringValue } from "../utils/present
 const eventPresentation: Record<string, { actor: string; text: string; tone?: string }> = {
   PAPER_ANALYSIS_STARTED: { actor: "论文助手", text: "正在读取论文实验结构" },
   PAPER_ANALYSIS_COMPLETED: { actor: "论文助手", text: "论文实验分析已完成" },
+  GOAL_RESOLUTION_STARTED: { actor: "目标解析器", text: "正在解析用户复现目标" },
+  GOAL_RESOLUTION_COMPLETED: { actor: "目标解析器", text: "复现目标解析已完成" },
   REPOSITORY_ANALYSIS_STARTED: { actor: "仓库助手", text: "正在检查仓库实现" },
   REPOSITORY_ANALYSIS_COMPLETED: { actor: "仓库助手", text: "仓库分析已完成" },
+  ALIGNMENT_STARTED: { actor: "对齐助手", text: "正在对齐论文实验与代码实现" },
+  ALIGNMENT_COMPLETED: { actor: "对齐助手", text: "论文与代码对齐已完成" },
+  ANALYSIS_FAILED: { actor: "ReproPilot", text: "Intake 分析失败", tone: "error" },
   EXPERIMENT_SELECTION_RESOLVED: { actor: "目标解析器", text: "实验选择已确定" },
   CLARIFICATION_REQUIRED: { actor: "目标解析器", text: "需要补充说明", tone: "warning" },
   RESOURCE_REQUIRED: { actor: "资源助手", text: "需要外部资源", tone: "warning" },

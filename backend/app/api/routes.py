@@ -7,10 +7,10 @@ from fastapi.responses import StreamingResponse
 
 from .auth import Principal
 from .dependencies import get_api_service, get_principal
-from .presenters import present_intake, present_job, present_session
+from .presenters import present_intake, present_job, present_session, present_event
 from .schemas import (
     AppendExperimentsRequest, ClarificationRequest, IntakeResponse,
-    JobSummaryResponse, ResourceSubmissionRequest, SessionResponse,
+    JobSummaryResponse, ProductEventResponse, ResourceSubmissionRequest, SessionResponse,
 )
 from .github_repository_url import GitHubRepositoryUrlError, normalize_github_repository_url
 from .sse import stream_job_events
@@ -60,9 +60,23 @@ async def create_intake(
     ))
 
 
+@router.get("/intakes", response_model=tuple[IntakeResponse, ...])
+def list_intakes(principal: Principal = Depends(get_principal), service=Depends(get_api_service)):
+    return tuple(present_intake(item) for item in service.list_intakes(principal=principal.principal_id))
+
+
 @router.get("/intakes/{intake_id}", response_model=IntakeResponse)
 def get_intake(intake_id: str, principal: Principal = Depends(get_principal), service=Depends(get_api_service)):
     return present_intake(service.get_intake(intake_id, principal=principal.principal_id))
+
+
+@router.get("/intakes/{intake_id}/events", response_model=tuple[ProductEventResponse, ...])
+def get_intake_events(
+    intake_id: str, principal: Principal = Depends(get_principal), service=Depends(get_api_service),
+):
+    return tuple(
+        present_event(item) for item in service.intake_events(intake_id, principal=principal.principal_id)
+    )
 
 
 @router.post("/intakes/{intake_id}/clarifications", response_model=IntakeResponse)

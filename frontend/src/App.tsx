@@ -48,6 +48,16 @@ export default function App() {
     queryFn: api.listJobs,
     refetchInterval: 10_000,
   });
+  const intakesQuery = useQuery({
+    queryKey: ["intakes"],
+    queryFn: api.listIntakes,
+    refetchInterval: 4_000,
+  });
+  const sessionsQuery = useQuery({
+    queryKey: ["sessions"],
+    queryFn: api.listSessions,
+    refetchInterval: 8_000,
+  });
   const intakeQuery = useQuery({
     queryKey: ["intake", selection.intakeId],
     queryFn: () => api.getIntake(selection.intakeId!),
@@ -85,6 +95,13 @@ export default function App() {
   const job = activeJob(routeJobQuery.data, intakeJobQuery.data) ?? activeSessionJob;
   const streamJobId = job?.job_id;
   const stream = useReproductionEvents(streamJobId);
+  const intakeEventsId = selection.intakeId ?? intakeQuery.data?.intake_id;
+  const intakeEventsQuery = useQuery({
+    queryKey: ["intake-events", intakeEventsId],
+    queryFn: () => api.getIntakeEvents(intakeEventsId!),
+    enabled: Boolean(intakeEventsId) && !streamJobId,
+    refetchInterval: intakeQuery.data?.state === "analyzing" ? 2_500 : false,
+  });
   const hasCanonicalResult = job?.state === "succeeded";
   const resultsQuery = useQuery({
     queryKey: ["results", streamJobId],
@@ -102,6 +119,8 @@ export default function App() {
   const refreshIntake = (intake: Intake) => {
     queryClient.setQueryData(["intake", intake.intake_id], intake);
     void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    void queryClient.invalidateQueries({ queryKey: ["intakes"] });
+    void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     if (intake.session_id) void queryClient.invalidateQueries({ queryKey: ["session", intake.session_id] });
   };
   const refreshSession = (session: ReproductionSession) => {
@@ -223,11 +242,12 @@ export default function App() {
       <div className="workspace-grid">
         <TaskHistory
           jobs={jobsQuery.data ?? []}
-          sessions={sessionQuery.data ? [sessionQuery.data] : []}
+          sessions={sessionsQuery.data ?? (sessionQuery.data ? [sessionQuery.data] : [])}
+          intakes={intakesQuery.data ?? []}
           activeJobId={job?.job_id}
           activeIntake={intakeQuery.data}
           activeSessionId={sessionQuery.data?.session_id}
-          loading={jobsQuery.isLoading}
+          loading={jobsQuery.isLoading && sessionsQuery.isLoading}
           onNew={() => { setActionError(undefined); navigate("/"); }}
           onSelectJob={(jobId) => { setActionError(undefined); navigate(`/reproductions/${encodeURIComponent(jobId)}`); }}
           onSelectIntake={(intakeId) => { setActionError(undefined); navigate(`/intakes/${encodeURIComponent(intakeId)}`); }}
@@ -237,7 +257,7 @@ export default function App() {
           intake={intakeQuery.data}
           session={sessionQuery.data}
           job={job}
-          events={stream.events}
+          events={stream.events.length ? stream.events : (intakeEventsQuery.data ?? [])}
           loading={intakeQuery.isLoading || routeJobQuery.isLoading || intakeJobQuery.isLoading || sessionQuery.isLoading}
           creating={createMutation.isPending}
           actionLoading={actionLoading}

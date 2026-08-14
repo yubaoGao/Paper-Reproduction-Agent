@@ -681,6 +681,8 @@ class PostgresPersistence:
         self.final_results = PostgresFinalResultRepository(session_factory)
         self.comparisons = PostgresComparisonReportRepository(session_factory)
         self.queue = PostgresDurableJobQueue(session_factory)
+        from .analysis_queue import PostgresIntakeAnalysisQueue
+        self.analysis_queue = PostgresIntakeAnalysisQueue(session_factory)
         self.external_resource_path_validator = external_resource_path_validator
         self.resources = PostgresResourceRegistry(
             session_factory, path_validator=external_resource_path_validator,
@@ -705,6 +707,10 @@ class PostgresProductPersistence:
     def __init__(self, session_factory: sessionmaker[Session], *, external_resource_path_validator=None) -> None:
         from .job_queue import PostgresDurableJobQueue
         from .resource_registry import PostgresResourceRegistry
+        from .analysis_queue import PostgresIntakeAnalysisQueue
+        from backend.app.services.paper_artifacts import FilesystemIntakePaperStore
+        import os
+        from pathlib import Path
 
         self.session_factory = session_factory
         self.sessions = PostgresReproductionSessionRepository(session_factory)
@@ -717,6 +723,9 @@ class PostgresProductPersistence:
         self.final_results = PostgresFinalResultRepository(session_factory)
         self.comparisons = PostgresComparisonReportRepository(session_factory)
         self.queue = PostgresDurableJobQueue(session_factory)
+        self.analysis_queue = PostgresIntakeAnalysisQueue(session_factory)
+        workspace = Path(os.environ.get("REPROPILOT_WORKSPACE_ROOT", "workspace"))
+        self.paper_artifacts = FilesystemIntakePaperStore(workspace / "intakes")
         self.resources = PostgresResourceRegistry(
             session_factory, path_validator=external_resource_path_validator,
         )

@@ -13,6 +13,7 @@ from typing import Any, TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from .budget import complete_analysis_llm_http_attempt, record_analysis_llm_http_attempt
 from .config import ProviderConfig
 from .contracts import (
     LLMCallMetadata,
@@ -25,6 +26,21 @@ from .contracts import (
 )
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _is_transport_error(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return status == 429 or status >= 500
+    if isinstance(exc, httpx.HTTPError):
+        return True
+    return False
+
+
+def _is_structured_output_error(exc: Exception) -> bool:
+    return isinstance(exc, (ValidationError, StructuredOutputError, KeyError, TypeError, json.JSONDecodeError))
 
 
 class _OpenAICompatibleStructuredAdapter(StructuredLLMClient):
@@ -65,8 +81,20 @@ class _OpenAICompatibleStructuredAdapter(StructuredLLMClient):
         ]
         last_error: Exception | None = None
         total_input = total_output = 0
-        for attempt in range(call_settings.max_retries + 1):
+        transport_attempts = 0
+        structured_repairs = 0
+        http_attempts = 0
+        while True:
             payload = self._payload(messages, call_settings)
+            retry_reason = None if last_error is None else type(last_error).__name__
+            budget_record = record_analysis_llm_http_attempt(
+                provider=self.config.provider,
+                model=self.config.model,
+                role=role,
+                prompt_name=prompt_name,
+                attempt=http_attempts,
+                retry_reason=retry_reason,
+            )
             try:
                 response = self._http.post(
                     f"{self.config.base_url.rstrip('/')}/chat/completions",
@@ -77,8 +105,13 @@ class _OpenAICompatibleStructuredAdapter(StructuredLLMClient):
                 response.raise_for_status()
                 body = response.json()
                 usage = body.get("usage") or {}
-                total_input += int(usage.get("prompt_tokens") or 0)
-                total_output += int(usage.get("completion_tokens") or 0)
+                prompt_tokens = int(usage.get("prompt_tokens") or 0)
+                completion_tokens = int(usage.get("completion_tokens") or 0)
+                total_input += prompt_tokens
+                total_output += completion_tokens
+                complete_analysis_llm_http_attempt(
+                    budget_record, input_tokens=prompt_tokens, output_tokens=completion_tokens,
+                )
                 raw = body["choices"][0]["message"]["content"]
                 if not raw:
                     raise StructuredOutputError("provider returned empty structured content")
@@ -94,24 +127,35 @@ class _OpenAICompatibleStructuredAdapter(StructuredLLMClient):
                         finished_at=finished,
                         input_tokens=total_input,
                         output_tokens=total_output,
-                        retry_count=attempt,
+                        retry_count=http_attempts,
                         prompt_name=prompt_name,
                         prompt_version=prompt_version,
                     ),
                 )
-            except (httpx.HTTPError, KeyError, TypeError, ValueError, ValidationError, StructuredOutputError) as exc:
+            except Exception as exc:
+                complete_analysis_llm_http_attempt(budget_record)
                 last_error = exc
-                if attempt >= call_settings.max_retries:
-                    break
-                messages.append({"role": "assistant", "content": "The previous response did not validate."})
-                messages.append({"role": "user", "content": f"Repair the JSON to exactly match the supplied schema. Validation issue: {str(exc)[:500]}"})
-                time.sleep(min(0.25 * (2**attempt), 2.0))
-        if isinstance(last_error, (ValidationError, StructuredOutputError, KeyError, TypeError, ValueError)):
+                http_attempts += 1
+                if _is_transport_error(exc):
+                    if transport_attempts >= call_settings.max_retries:
+                        break
+                    transport_attempts += 1
+                    time.sleep(min(0.25 * (2 ** transport_attempts), 2.0))
+                    continue
+                if _is_structured_output_error(exc):
+                    if structured_repairs >= call_settings.max_structured_repairs:
+                        break
+                    structured_repairs += 1
+                    messages.append({"role": "assistant", "content": "The previous response did not validate."})
+                    messages.append({"role": "user", "content": f"Repair the JSON to exactly match the supplied schema. Validation issue: {str(exc)[:500]}"})
+                    continue
+                raise
+        if isinstance(last_error, (ValidationError, StructuredOutputError, KeyError, TypeError, ValueError, json.JSONDecodeError)):
             raise StructuredOutputError(
-                f"{self.config.provider} structured output failed after {call_settings.max_retries + 1} attempts: {last_error}"
+                f"{self.config.provider} structured output failed after {http_attempts} HTTP attempts: {last_error}"
             ) from last_error
         raise LLMProviderError(
-            f"{self.config.provider} request failed after {call_settings.max_retries + 1} attempts: {last_error}"
+            f"{self.config.provider} request failed after {http_attempts} HTTP attempts: {last_error}"
         ) from last_error
 
     def _payload(self, messages: list[dict[str, Any]], settings: LLMCallSettings) -> dict[str, Any]:

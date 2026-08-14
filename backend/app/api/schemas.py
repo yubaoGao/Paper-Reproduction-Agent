@@ -37,6 +37,7 @@ class IntakeResponse(APIModel):
     intake_id: str
     session_id: str | None = None
     state: str
+    current_phase: str | None = None
     goal: str
     repository_url: str
     candidate_experiment_ids: tuple[str, ...] = ()
@@ -46,6 +47,9 @@ class IntakeResponse(APIModel):
     planning_status: str | None = None
     planning_blockers: tuple[dict[str, Any], ...] = ()
     waiting_reason: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    failed_phase: str | None = None
     job_id: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -102,8 +106,8 @@ class SessionResponse(APIModel):
     status: str
     origin_intake_id: str
     repository_url: str
-    repository_snapshot_id: str
-    repository_commit_sha: str
+    repository_snapshot_id: str | None = None
+    repository_commit_sha: str | None = None
     paper_content_hash: str
     source_filename: str
     goal: str | None = None
@@ -119,6 +123,16 @@ class SessionResponse(APIModel):
     jobs: tuple[JobSummaryResponse, ...] = ()
     created_at: datetime
     updated_at: datetime
+
+
+class ProductEventResponse(APIModel):
+    event_id: str
+    sequence: int
+    intake_id: str
+    job_id: str | None = None
+    type: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
 
 
 class ErrorResponse(APIModel):

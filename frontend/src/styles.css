@@ -76,6 +76,12 @@ button { color: inherit; }
 .assistant-message { max-width: 720px; border: 1px solid #e3e7ee; background: #fbfcfd; border-radius: 4px 16px 16px; padding: 18px; margin: 0 0 22px; box-shadow: 0 5px 18px rgba(25, 38, 65, .035); }
 .analyzing-message { display: flex; align-items: flex-start; gap: 14px; }
 .analyzing-message p { color: var(--muted); margin: 5px 0 0; font-size: 12px; line-height: 1.5; }
+.analysis-phase-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
+.analysis-phase-list li { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.analysis-phase-list li.done { color: #188050; }
+.analysis-phase-list li.active { color: var(--blue); font-weight: 600; }
+.analysis-phase-list li.skipped { opacity: .55; }
+.phase-mark { width: 16px; text-align: center; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .assistant-label { color: #526cbe; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 10px; }
 .assistant-label.warning { color: #a36900; }
 .assistant-label.success { color: #188050; }

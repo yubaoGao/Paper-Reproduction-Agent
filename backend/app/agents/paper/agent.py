@@ -5,7 +5,7 @@ from datetime import datetime,timezone
 from pathlib import Path
 from pydantic import BaseModel,ConfigDict,Field
 from backend.app.domain import EvidenceReference, EvaluationPolicySource, ExtractionStatus, ExtractionTrace, FigureObservation, PaperDocument
-from backend.app.llm import LLMCallMetadata, LLMRole, LLMRouter, StructuredOutputError
+from backend.app.llm import ANALYSIS_CONTROL_FLOW_ERRORS, LLMCallMetadata, LLMProviderError, LLMRole, LLMRouter, StructuredOutputError
 from .catalog import CatalogMerger,CatalogValidator,CatalogValidationError,PaperExtractionError
 from .context import ContextBuilder,DeterministicTableExtractor
 from .evidence import EvidenceValidationError,EvidenceValidator
@@ -61,6 +61,8 @@ class PaperExperimentExtractionAgent:
             if not review.value.valid or review.value.missing_components:
                 new_missing=tuple(dict.fromkeys((*catalog.extraction_metadata.missing_components,*review.value.missing_components)))
                 catalog=catalog.model_copy(update={"extraction_status":ExtractionStatus.PARTIAL,"extraction_metadata":catalog.extraction_metadata.model_copy(update={"missing_components":new_missing,"warnings":tuple(dict.fromkeys((*catalog.extraction_metadata.warnings,*review.value.warnings)))})})
+        except ANALYSIS_CONTROL_FLOW_ERRORS:
+            raise
         except Exception as exc:
             warning=f"catalog review unavailable: {exc}"; warnings.append(warning)
             missing_components=tuple(dict.fromkeys((*catalog.extraction_metadata.missing_components,"catalog_review")))
@@ -74,12 +76,20 @@ class PaperExperimentExtractionAgent:
         try:
             response=self.router.for_role(LLMRole.PRIMARY).generate_structured(role=LLMRole.PRIMARY,system_prompt=prompt.system,content=request,output_schema=StageExtraction,prompt_name=prompt.name,prompt_version=prompt.version); calls.append(response.metadata); candidate=response.value
             self._validate_stage(candidate,document); return candidate,calls,repairs,None
+        except ANALYSIS_CONTROL_FLOW_ERRORS:
+            raise
+        except (LLMProviderError, StructuredOutputError) as exc:
+            return None,calls,repairs,str(exc)
         except Exception as exc: issue=str(exc)
         for attempt in range(self.settings.max_repair_attempts):
             repairs+=1; role=LLMRole.FAST if attempt==0 else LLMRole.PRIMARY; repair_prompt=self.prompts.get("repair")
             try:
                 response=self.router.for_role(role).generate_structured(role=role,system_prompt=repair_prompt.system,content=f"{repair_prompt.task}\nSTAGE: {name}\nVALIDATION ISSUE: {issue}\nUNTRUSTED CONTEXT:\n{content}",output_schema=StageExtraction,prompt_name=repair_prompt.name,prompt_version=repair_prompt.version); calls.append(response.metadata); candidate=response.value
                 self._validate_stage(candidate,document); return candidate,calls,repairs,None
+            except ANALYSIS_CONTROL_FLOW_ERRORS:
+                raise
+            except (LLMProviderError, StructuredOutputError) as exc:
+                return None,calls,repairs,str(exc)
             except Exception as exc: issue=str(exc)
         return None,calls,repairs,f"{name} retry exhaustion: {issue}"
     def _validate_stage(self,stage,document):
@@ -106,4 +116,6 @@ class PaperExperimentExtractionAgent:
         try:
             response=self.router.for_role(LLMRole.VISION).generate_structured(role=LLMRole.VISION,system_prompt=prompt.system,content=f"{prompt.task}\nFigure id: {figure_id}\nUNTRUSTED CAPTION: {figure.caption}\nUse evidence locator figure:{figure_id}",images=(str(image),),output_schema=FigureObservation,prompt_name=prompt.name,prompt_version=prompt.version)
             self.evidence_validator.validate_all(response.value.evidence,document); return response.value,response.metadata,None
+        except ANALYSIS_CONTROL_FLOW_ERRORS:
+            raise
         except Exception as exc: return None,None,str(exc)

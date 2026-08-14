@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime,timezone
 from backend.app.domain import PlanningMetadata,PlanningOverrides,PlanningTrace,ReproductionPolicy
-from backend.app.llm import LLMRole
+from backend.app.llm import ANALYSIS_CONTROL_FLOW_ERRORS, LLMProviderError, LLMRole, StructuredOutputError
 from backend.app.services import PlanningSettings,ReproductionPlanningError
 from .catalog import ReproductionPlanValidator
 from .deterministic import DeterministicPlanBuilder
@@ -31,6 +31,8 @@ class ReproductionPlannerAgent:
                     prompt=self.prompts.get("plan_review")
                     response=self.router.for_role(LLMRole.FAST).generate_structured(role=LLMRole.FAST,system_prompt=prompt.system,content=f"{prompt.task}\nPLAN SUMMARY:\n{plan.model_dump_json(exclude={'decisions'})}",output_schema=PlanReview,prompt_name=prompt.name,prompt_version=prompt.version)
                     calls.append(response.metadata); warnings.extend(response.value.warnings)
+                except ANALYSIS_CONTROL_FLOW_ERRORS:
+                    raise
                 except Exception as exc: warnings.append(f"plan review unavailable: {exc}")
             if warnings: plan=plan.model_copy(update={"warnings":tuple(dict.fromkeys((*plan.warnings,*warnings))),"metadata":plan.metadata.model_copy(update={"warnings":tuple(dict.fromkeys((*plan.metadata.warnings,*warnings)))})})
             finished=datetime.now(timezone.utc)
@@ -38,6 +40,8 @@ class ReproductionPlannerAgent:
             plan=plan.model_copy(update={"metadata":plan.metadata.model_copy(update={"prompt_versions":versions})})
             trace=PlanningTrace(plan_id=plan.plan_id,reproduction_specification_id=specification.id,paper_catalog_id=paper_catalog.catalog_id,repository_catalog_id=repository_catalog.catalog_id,alignment_catalog_id=alignment_catalog.catalog_id,repository_snapshot_id=repository_catalog.snapshot_id,resolved_commit_sha=repository_catalog.resolved_commit_sha,policy=policy,started_at=started,finished_at=finished,deterministic_decision_count=len(plan.decisions),primary_calls=sum(x.role is LLMRole.PRIMARY for x in calls),fast_calls=sum(x.role is LLMRole.FAST for x in calls),repair_attempts=repairs,prompt_versions=versions,warnings=plan.warnings,blocker_codes=tuple(x.code for x in plan.blockers),usage=tuple(x.model_dump(mode="json") for x in calls),status=plan.status)
             return PlanningResult(plan=plan,trace=trace)
+        except ANALYSIS_CONTROL_FLOW_ERRORS:
+            raise
         except ReproductionPlanningError: raise
         except Exception as exc: raise ReproductionPlanningError(f"reproduction planning failed: {exc}") from exc
 
@@ -56,5 +60,9 @@ class ReproductionPlannerAgent:
                     if item.entrypoint_id not in ids or item.entrypoint_id not in record.entrypoint_ids: raise ValueError("selection contains an invalid entrypoint")
                     if not set(item.config_ids)<=config_ids or not set(item.config_ids)<=set(record.config_ids): raise ValueError("selection contains an invalid config")
                 return selected,calls,attempt
+            except ANALYSIS_CONTROL_FLOW_ERRORS:
+                raise
+            except (LLMProviderError, StructuredOutputError) as exc:
+                return SemanticSelectionSet(),calls,attempt
             except Exception as exc: issue=str(exc)
         return SemanticSelectionSet(),calls,self.settings.max_repair_attempts

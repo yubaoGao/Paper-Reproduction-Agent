@@ -1,7 +1,7 @@
 """Hierarchical repository-map, symbol and bounded source context selection."""
 from __future__ import annotations
 import json,re
-from backend.app.llm import LLMRole
+from backend.app.llm import ANALYSIS_CONTROL_FLOW_ERRORS, LLMRole
 from .schemas import FileClassification,RepositoryAnalysisContext,RepositoryContextItem
 
 class RepositoryContextBuilder:
@@ -18,6 +18,8 @@ class RepositoryContextBuilder:
             try:
                 response=self.router.for_role(LLMRole.FAST).generate_structured(role=LLMRole.FAST,system_prompt=prompt.system,content=f"{prompt.task}\nUNTRUSTED FILE MAP:\n{payload}",output_schema=FileClassification,prompt_name=prompt.name,prompt_version=prompt.version);metadata.append(response.metadata)
                 decisions={x.path:x.relevant for x in response.value.decisions};scores={p:s+(20 if decisions.get(p) else 0) for p,s in scores.items()}
+            except ANALYSIS_CONTROL_FLOW_ERRORS:
+                raise
             except Exception:pass
         chosen=tuple(p for p,_ in sorted(scores.items(),key=lambda x:(-x[1],x[0]))[:self.max_files]);items=[]
         records={x.path:x for x in snapshot.files};symbol_map={p:[] for p in chosen};config_map={p:[] for p in chosen};dependency_map={p:[] for p in chosen}

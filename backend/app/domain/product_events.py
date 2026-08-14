@@ -8,9 +8,11 @@ from enum import Enum
 from pydantic import Field, JsonValue, field_validator, model_validator
 
 from .alignment import PaperCodeAlignmentCatalog
+from .analysis import IntakeAnalysisPhase
 from .experiment import DomainModel, NonEmptyStr, _require_aware, utc_now
 from .external_resources import ResourceResolutionReport
 from .intelligence import GoalResolutionResult, PaperExperimentCatalog
+from .paper import PaperDocument
 from .planner import ReproductionExecutionPlan
 from .repository import RepositoryAnalysisCatalog
 from .reproduction import PaperReference
@@ -23,14 +25,20 @@ class ReproductionIntakeState(str, Enum):
     READY_TO_RUN = "ready_to_run"
     QUEUED = "queued"
     RUNNING = "running"
+    FAILED = "failed"
     TERMINAL = "terminal"
 
 
 class ReproductionEventType(str, Enum):
     PAPER_ANALYSIS_STARTED = "PAPER_ANALYSIS_STARTED"
     PAPER_ANALYSIS_COMPLETED = "PAPER_ANALYSIS_COMPLETED"
+    GOAL_RESOLUTION_STARTED = "GOAL_RESOLUTION_STARTED"
+    GOAL_RESOLUTION_COMPLETED = "GOAL_RESOLUTION_COMPLETED"
     REPOSITORY_ANALYSIS_STARTED = "REPOSITORY_ANALYSIS_STARTED"
     REPOSITORY_ANALYSIS_COMPLETED = "REPOSITORY_ANALYSIS_COMPLETED"
+    ALIGNMENT_STARTED = "ALIGNMENT_STARTED"
+    ALIGNMENT_COMPLETED = "ALIGNMENT_COMPLETED"
+    ANALYSIS_FAILED = "ANALYSIS_FAILED"
     EXPERIMENT_SELECTION_RESOLVED = "EXPERIMENT_SELECTION_RESOLVED"
     CLARIFICATION_REQUIRED = "CLARIFICATION_REQUIRED"
     RESOURCE_REQUIRED = "RESOURCE_REQUIRED"
@@ -103,7 +111,9 @@ class ReproductionIntake(DomainModel):
     repository_url: NonEmptyStr
     user_goal: NonEmptyStr
     state: ReproductionIntakeState
+    current_phase: IntakeAnalysisPhase = IntakeAnalysisPhase.PENDING
     paper: PaperReference | None = None
+    paper_document: PaperDocument | None = None
     paper_catalog: PaperExperimentCatalog | None = None
     repository_catalog: RepositoryAnalysisCatalog | None = None
     alignment_catalog: PaperCodeAlignmentCatalog | None = None
@@ -112,6 +122,10 @@ class ReproductionIntake(DomainModel):
     execution_plan: ReproductionExecutionPlan | None = None
     clarification_answers: tuple[NonEmptyStr, ...] = ()
     waiting_reason: NonEmptyStr | None = None
+    error_code: NonEmptyStr | None = None
+    error_message: NonEmptyStr | None = None
+    failed_phase: IntakeAnalysisPhase | None = None
+    llm_call_count: int = Field(default=0, ge=0)
     job_id: NonEmptyStr | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -132,4 +146,7 @@ class ReproductionIntake(DomainModel):
         if self.state is ReproductionIntakeState.READY_TO_RUN:
             if self.execution_plan is None or self.job_id is None:
                 raise ValueError("ready intake requires an execution plan and durable job")
+        if self.state is ReproductionIntakeState.FAILED:
+            if self.error_code is None or self.error_message is None:
+                raise ValueError("failed intake requires error_code and error_message")
         return self

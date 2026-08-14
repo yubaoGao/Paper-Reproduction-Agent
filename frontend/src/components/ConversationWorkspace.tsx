@@ -61,11 +61,50 @@ function UserPrompt({ intake, session, job }: { intake?: Intake; session?: Repro
   );
 }
 
-function AnalyzingCard() {
+function AnalyzingCard({ phase }: { phase?: string | null }) {
+  const steps = [
+    { id: "paper_parsing", label: "解析论文" },
+    { id: "paper_extracting", label: "提取实验" },
+    { id: "goal_resolving", label: "解析用户复现目标" },
+    { id: "repository_analyzing", label: "分析代码仓库" },
+    { id: "aligning", label: "论文代码对齐" },
+  ] as const;
+  const rank: Record<string, number> = {
+    pending: 0,
+    paper_parsing: 1,
+    paper_extracting: 2,
+    goal_resolving: 3,
+    waiting_for_clarification: 3,
+    repository_analyzing: 4,
+    aligning: 5,
+    preparing: 6,
+    ready_to_run: 6,
+    failed: 0,
+  };
+  const current = rank[phase ?? "pending"] ?? 0;
+  const stoppedEarly = phase === "waiting_for_clarification";
   return (
     <div className="assistant-message analyzing-message">
       <Spin indicator={<LoadingOutlined spin />} />
-      <div><strong>正在分析您的复现请求</strong><p>正在阅读论文、梳理仓库实现并确定实验范围。</p></div>
+      <div>
+        <strong>正在分析您的复现请求</strong>
+        <p>正在按阶段处理。代码仓库分析仅在实验范围明确之后才会开始。</p>
+        <ol className="analysis-phase-list">
+          {steps.map((step, index) => {
+            const stepRank = index + 1;
+            const skipped = stoppedEarly && stepRank > 3;
+            const done = !skipped && current > stepRank;
+            const active = !skipped && current === stepRank;
+            const mark = skipped ? "○" : done ? "✓" : active ? "●" : "○";
+            return (
+              <li key={step.id} className={active ? "active" : done ? "done" : skipped ? "skipped" : undefined}>
+                <span className="phase-mark">{mark}</span>
+                {step.label}
+              </li>
+            );
+          })}
+        </ol>
+      </div>
     </div>
   );
 }
@@ -236,13 +275,14 @@ function SessionComposer({ disabled, loading, onSubmit }: { disabled: boolean; l
 }
 
 export function ConversationWorkspace(props: Props) {
-  const { intake, session, job, events, loading, creating, actionLoading, error, streamStatus } = props;
+  const { intake, session, job, events, creating, actionLoading, error, streamStatus } = props;
   const latestEpoch = useMemo(() => [...events].reverse().find((event) => event.type === "EPOCH_PROGRESS"), [events]);
   const clarifying = session?.status === "awaiting_clarification" || intake?.state === "ambiguous";
   const waitingResource = session?.status === "waiting_for_resource" || intake?.state === "waiting_for_resource";
   const readyToRun = Boolean(session?.pending_job_id) || intake?.state === "ready_to_run";
-  const analyzing = creating || loading || intake?.state === "analyzing";
-  const canAppend = Boolean(session) && !analyzing && !clarifying && !waitingResource;
+  const failed = intake?.state === "failed";
+  const analyzing = creating || intake?.state === "analyzing";
+  const canAppend = Boolean(session) && !analyzing && !clarifying && !waitingResource && !failed;
   if (!intake && !job && !session && !creating) {
     return <main className="conversation-panel"><NewReproductionForm loading={creating} error={error} onSubmit={props.onCreate} /></main>;
   }
@@ -254,7 +294,15 @@ export function ConversationWorkspace(props: Props) {
       </header>
       <div className="conversation-scroll">
         <UserPrompt intake={intake} session={session} job={job} />
-        {analyzing && <AnalyzingCard />}
+        {analyzing && <AnalyzingCard phase={intake?.current_phase} />}
+        {failed && (
+          <Alert
+            type="error"
+            showIcon
+            message={intake?.error_code ? `分析失败 · ${intake.error_code}` : "分析失败"}
+            description={intake?.error_message ?? intake?.waiting_reason ?? "Intake 分析未能完成。"}
+          />
+        )}
         {error && <Alert type="error" showIcon message="ReproPilot 无法继续执行" description={error} closable />}
         {session && <ExperimentCatalog experiments={session.experiments} loading={actionLoading} onRun={props.onRunExperiment} />}
         <ProductEventTimeline events={events} />

@@ -5,7 +5,20 @@ export type IntakeState =
   | "ready_to_run"
   | "queued"
   | "running"
+  | "failed"
   | "terminal";
+
+export type IntakePhase =
+  | "pending"
+  | "paper_parsing"
+  | "paper_extracting"
+  | "goal_resolving"
+  | "waiting_for_clarification"
+  | "repository_analyzing"
+  | "aligning"
+  | "preparing"
+  | "ready_to_run"
+  | "failed";
 
 export type SessionStatus =
   | "active"
@@ -47,6 +60,7 @@ export interface ResourceRequirement {
 export interface Intake {
   intake_id: string;
   state: IntakeState;
+  current_phase?: IntakePhase | string | null;
   goal: string;
   repository_url: string;
   candidate_experiment_ids: string[];
@@ -56,6 +70,9 @@ export interface Intake {
   planning_status?: string | null;
   planning_blockers: Array<Record<string, unknown>>;
   waiting_reason?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  failed_phase?: IntakePhase | string | null;
   job_id?: string | null;
   session_id?: string | null;
   created_at: string;
@@ -185,8 +202,8 @@ export interface ReproductionSession {
   status: SessionStatus | string;
   origin_intake_id: string;
   repository_url: string;
-  repository_snapshot_id: string;
-  repository_commit_sha: string;
+  repository_snapshot_id?: string | null;
+  repository_commit_sha?: string | null;
   paper_content_hash: string;
   source_filename: string;
   goal?: string | null;

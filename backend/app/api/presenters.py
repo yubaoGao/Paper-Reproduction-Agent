@@ -6,6 +6,7 @@ from .schemas import (
     ExperimentJobHistoryResponse,
     IntakeResponse,
     JobSummaryResponse,
+    ProductEventResponse,
     ResourceRequirementResponse,
     SessionExperimentResponse,
     SessionResponse,
@@ -36,7 +37,9 @@ def present_intake(intake):
     selection = None if goal is None else goal.selection
     return IntakeResponse(
         intake_id=intake.intake_id, session_id=intake.session_id,
-        state=intake.state.value, goal=intake.user_goal,
+        state=intake.state.value,
+        current_phase=None if intake.current_phase is None else intake.current_phase.value,
+        goal=intake.user_goal,
         repository_url=intake.repository_url,
         candidate_experiment_ids=() if goal is None else goal.candidate_experiment_ids,
         selected_experiment_ids=() if selection is None else selection.selected_experiment_ids,
@@ -47,7 +50,10 @@ def present_intake(intake):
             "code": item.code, "message": item.message,
             "paper_experiment_id": item.paper_experiment_id,
         } for item in intake.execution_plan.blockers),
-        waiting_reason=intake.waiting_reason, job_id=intake.job_id,
+        waiting_reason=intake.waiting_reason,
+        error_code=intake.error_code, error_message=intake.error_message,
+        failed_phase=None if intake.failed_phase is None else intake.failed_phase.value,
+        job_id=intake.job_id,
         created_at=intake.created_at, updated_at=intake.updated_at,
     )
 
@@ -137,4 +143,12 @@ def present_session(session, *, jobs=(), experiments=(), events=()):
         ),
         jobs=job_summaries,
         created_at=session.created_at, updated_at=session.updated_at,
+    )
+
+
+def present_event(event):
+    return ProductEventResponse(
+        event_id=event.event_id, sequence=event.sequence, intake_id=event.intake_id,
+        job_id=event.job_id, type=event.event_type.value, payload=event.payload,
+        created_at=event.created_at,
     )

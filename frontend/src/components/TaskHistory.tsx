@@ -7,6 +7,7 @@ import { StatusPill } from "./StatusPill";
 interface Props {
   jobs: JobDetail[];
   sessions?: ReproductionSession[];
+  intakes?: Intake[];
   activeJobId?: string;
   activeIntake?: Intake;
   activeSessionId?: string;
@@ -18,9 +19,14 @@ interface Props {
 }
 
 export function TaskHistory({
-  jobs, sessions = [], activeJobId, activeIntake, activeSessionId, loading,
+  jobs, sessions = [], intakes = [], activeJobId, activeIntake, activeSessionId, loading,
   onNew, onSelectJob, onSelectIntake, onSelectSession,
 }: Props) {
+  const visibleIntakes = intakes.filter((intake) =>
+    ["analyzing", "failed", "ambiguous", "waiting_for_resource"].includes(intake.state)
+    && !sessions.some((session) => session.origin_intake_id === intake.intake_id)
+    && !jobs.some((job) => job.job_id === intake.job_id)
+  );
   return (
     <aside className="history-panel" aria-label="复现会话">
       <div className="panel-heading">
@@ -36,6 +42,19 @@ export function TaskHistory({
       <div className="history-section-label">最近会话</div>
       <div className="history-list">
         {loading && <Skeleton active paragraph={{ rows: 5 }} title={false} />}
+        {!loading && visibleIntakes.map((intake) => (
+          <button
+            className={`history-item ${activeIntake?.intake_id === intake.intake_id ? "active" : ""}`}
+            key={intake.intake_id}
+            onClick={() => onSelectIntake(intake.intake_id)}
+          >
+            <div className="history-item-title">{intake.goal}</div>
+            <div className="history-item-meta">
+              <StatusPill status={intake.state} />
+              <span><ClockCircleOutlined /> {formatTime(intake.updated_at)}</span>
+            </div>
+          </button>
+        ))}
         {!loading && sessions.map((session) => (
           <button
             className={`history-item ${activeSessionId === session.session_id ? "active" : ""}`}
@@ -51,7 +70,7 @@ export function TaskHistory({
             </div>
           </button>
         ))}
-        {!loading && activeIntake && !jobs.some((job) => job.job_id === activeIntake.job_id) && !sessions.some((session) => session.origin_intake_id === activeIntake.intake_id) && (
+        {!loading && activeIntake && !jobs.some((job) => job.job_id === activeIntake.job_id) && !sessions.some((session) => session.origin_intake_id === activeIntake.intake_id) && !visibleIntakes.some((item) => item.intake_id === activeIntake.intake_id) && (
           <button className="history-item active" onClick={() => onSelectIntake(activeIntake.intake_id)}>
             <div className="history-item-title">{activeIntake.goal}</div>
             <div className="history-item-meta"><StatusPill status={activeIntake.state} /><span><ClockCircleOutlined /> {formatTime(activeIntake.created_at)}</span></div>
@@ -72,7 +91,7 @@ export function TaskHistory({
             </div>
           </button>
         ))}
-        {!loading && jobs.length === 0 && !activeIntake && sessions.length === 0 && (
+        {!loading && jobs.length === 0 && visibleIntakes.length === 0 && sessions.length === 0 && (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无复现任务" />
         )}
       </div>

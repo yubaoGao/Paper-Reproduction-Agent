@@ -5,6 +5,7 @@ import type {
   Intake,
   JobDetail,
   ReproductionSession,
+  ProductEvent,
 } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
@@ -57,8 +58,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
   listJobs: () => request<JobDetail[]>("/api/v1/reproductions"),
+  listIntakes: () => request<Intake[]>("/api/v1/reproductions/intakes"),
+  listSessions: () => request<ReproductionSession[]>("/api/v1/reproductions/sessions"),
   getJob: (jobId: string) => request<JobDetail>(`/api/v1/reproductions/${encodeURIComponent(jobId)}`),
   getIntake: (intakeId: string) => request<Intake>(`/api/v1/reproductions/intakes/${encodeURIComponent(intakeId)}`),
+  getIntakeEvents: (intakeId: string) =>
+    request<ProductEvent[]>(`/api/v1/reproductions/intakes/${encodeURIComponent(intakeId)}/events`),
   createIntake: (input: { pdf: File; repositoryUrl: string; goal: string }) => {
     const form = new FormData();
     form.append("paper_pdf", input.pdf);

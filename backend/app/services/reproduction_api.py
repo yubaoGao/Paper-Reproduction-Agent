@@ -8,14 +8,23 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 from backend.app.domain import (
-    AuthoritativePlanningSnapshot, GoalResolutionResult, GoalResolutionStatus,
-    PaperCodeAlignmentCatalog, PaperDocument, PaperExperimentCatalog, PaperReference,
+    ANALYSIS_ARTIFACT_STORE_FAILED, ANALYSIS_ENQUEUE_FAILED, ANALYSIS_FAILED,
+    ANALYSIS_LLM_BUDGET_EXCEEDED, ANALYSIS_TIMEOUT, GOAL_NOT_FOUND,
+    REPOSITORY_SNAPSHOT_MISSING,
+    AnalysisJobStatus, AuthoritativePlanningSnapshot, GoalResolutionResult, GoalResolutionStatus,
+    IntakeAnalysisJob, IntakeAnalysisPhase, PaperCodeAlignmentCatalog, PaperDocument,
+    PaperExperimentCatalog, PaperReference,
     PlanStatus, RepositoryAnalysisCatalog, ReproductionEventType,
     ReproductionExecutionPlan, ReproductionIntake, ReproductionIntakeState,
     ReproductionJob, ReproductionJobStatus, ReproductionSession,
     ReproductionSessionStatus, RepositorySnapshot, UserReproductionGoal,
     ResultValidationStatus,
 )
+from backend.app.llm.budget import (
+    AnalysisLLMBudget, AnalysisLLMBudgetExceeded, AnalysisLLMBudgetSettings,
+    AnalysisLeaseLostError, AnalysisTimeoutError,
+)
+from backend.app.services.analysis_queue import AnalysisJobLeaseLostError
 from backend.app.services.external_resources import ExternalResourceResolutionService
 from backend.app.services.persistence import PersistenceEntityNotFoundError
 from backend.app.services.session_projection import completed_experiment_ids, project_session_experiments
@@ -41,6 +50,23 @@ class PlanningBlockedError(APIUseCaseError):
     code = "planning_blocked"
 
 
+class IntakeBootstrapError(APIUseCaseError):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
+
+_ANALYSIS_SKIP_STATES = {
+    ReproductionIntakeState.AMBIGUOUS,
+    ReproductionIntakeState.WAITING_FOR_RESOURCE,
+    ReproductionIntakeState.READY_TO_RUN,
+    ReproductionIntakeState.QUEUED,
+    ReproductionIntakeState.RUNNING,
+    ReproductionIntakeState.FAILED,
+    ReproductionIntakeState.TERMINAL,
+}
+
+
 _REMAINING_PHRASES = (
     "remaining",
     "the rest",
@@ -62,9 +88,9 @@ _REMAINING_PHRASES = (
 class IntakeAnalysis:
     paper: PaperReference
     paper_catalog: PaperExperimentCatalog
-    repository_catalog: RepositoryAnalysisCatalog
-    alignment_catalog: PaperCodeAlignmentCatalog
     goal_resolution: GoalResolutionResult
+    repository_catalog: RepositoryAnalysisCatalog | None = None
+    alignment_catalog: PaperCodeAlignmentCatalog | None = None
     repository_snapshot: RepositorySnapshot | None = None
     paper_document: PaperDocument | None = None
 
@@ -74,7 +100,10 @@ class ReproductionAnalysisPipeline(Protocol):
 
     def analyze(
         self, *, intake_id: str, source_filename: str, paper_pdf: bytes,
-        repository_url: str, goal: str, on_event=None,
+        repository_url: str, goal: str, on_event=None, on_phase=None,
+        on_checkpoint=None, on_snapshot=None, paper=None, paper_catalog=None,
+        paper_document=None, repository_catalog=None, alignment_catalog=None,
+        repository_snapshot=None,
     ) -> IntakeAnalysis: ...
 
     def clarify(
@@ -92,61 +121,219 @@ class ReproductionAnalysisPipeline(Protocol):
 class ReproductionAPIService:
     """Owns product transitions but delegates all scientific work to existing services."""
 
-    def __init__(self, persistence, pipeline: ReproductionAnalysisPipeline, resource_service: ExternalResourceResolutionService):
+    def __init__(
+        self, persistence, pipeline: ReproductionAnalysisPipeline,
+        resource_service: ExternalResourceResolutionService, *,
+        analysis_queue=None, paper_artifacts=None,
+        analysis_settings: AnalysisLLMBudgetSettings | None = None,
+    ):
         self.persistence = persistence
         self.pipeline = pipeline
         self.resource_service = resource_service
+        self.analysis_queue = analysis_queue if analysis_queue is not None else getattr(persistence, "analysis_queue", None)
+        self.paper_artifacts = paper_artifacts if paper_artifacts is not None else getattr(persistence, "paper_artifacts", None)
+        self.analysis_settings = analysis_settings or AnalysisLLMBudgetSettings.from_env()
 
     def create_intake(self, *, principal: str, source_filename: str, paper_pdf: bytes, repository_url: str, goal: str):
+        if self.analysis_queue is None or self.paper_artifacts is None:
+            raise APIUseCaseError("production persistence omitted the intake analysis queue")
         now = datetime.now(timezone.utc)
         intake = ReproductionIntake(
             intake_id=f"intake:{uuid.uuid4().hex}", owner_principal=principal,
             source_filename=source_filename, repository_url=repository_url,
             user_goal=goal, state=ReproductionIntakeState.ANALYZING,
+            current_phase=IntakeAnalysisPhase.PENDING,
             created_at=now, updated_at=now,
         )
-        self.persistence.intakes.create(intake)
-        analysis = self.pipeline.analyze(
-            intake_id=intake.intake_id, source_filename=source_filename,
-            paper_pdf=paper_pdf, repository_url=repository_url, goal=goal,
-            on_event=lambda event_type, payload: self._event(intake, event_type, payload),
+        created = False
+        stored = False
+        try:
+            self.persistence.intakes.create(intake)
+            created = True
+            try:
+                artifact_uri = self.paper_artifacts.store(intake.intake_id, source_filename, paper_pdf)
+            except Exception as exc:
+                raise IntakeBootstrapError(
+                    ANALYSIS_ARTIFACT_STORE_FAILED, f"failed to persist paper PDF: {exc}",
+                ) from exc
+            stored = True
+            try:
+                self.analysis_queue.enqueue(
+                    IntakeAnalysisJob(
+                        job_id=f"analysis:{intake.intake_id}",
+                        intake_id=intake.intake_id,
+                        owner_principal=principal,
+                        status=AnalysisJobStatus.QUEUED,
+                        paper_artifact_uri=artifact_uri,
+                        max_attempts=self.analysis_settings.max_job_attempts,
+                        enqueued_at=now,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            except Exception as exc:
+                raise IntakeBootstrapError(
+                    ANALYSIS_ENQUEUE_FAILED, f"failed to enqueue intake analysis: {exc}",
+                ) from exc
+            return intake
+        except Exception as exc:
+            if created:
+                code = getattr(exc, "code", ANALYSIS_FAILED) or ANALYSIS_FAILED
+                try:
+                    self.fail_analysis(
+                        intake.intake_id, error_code=code,
+                        error_message=str(exc) or "intake analysis could not be started",
+                        failed_phase=IntakeAnalysisPhase.PENDING,
+                    )
+                except Exception:
+                    pass
+            if stored:
+                try:
+                    self.paper_artifacts.delete(intake.intake_id)
+                except Exception:
+                    pass
+            raise
+
+    def execute_analysis_job(self, job: IntakeAnalysisJob, *, interrupt_check=None) -> ReproductionIntake:
+        intake = self.persistence.intakes.get(job.intake_id)
+        if intake.state in _ANALYSIS_SKIP_STATES:
+            return intake
+        if intake.repository_catalog is not None:
+            snapshot = self._load_repository_snapshot(intake.repository_catalog.snapshot_id)
+            if snapshot is None:
+                return self.fail_analysis(
+                    intake.intake_id, error_code=REPOSITORY_SNAPSHOT_MISSING,
+                    error_message="repository snapshot is missing after repository analysis completed",
+                    failed_phase=intake.current_phase or IntakeAnalysisPhase.REPOSITORY_ANALYZING,
+                )
+        else:
+            snapshot = None
+        paper_pdf = self.paper_artifacts.load(job.intake_id)
+        job = self.analysis_queue.mark_analysis_started(job.job_id, job.worker_id, job.lease_token)
+        budget = AnalysisLLMBudget(
+            self.analysis_settings,
+            initial_phase_count=job.llm_call_count,
+            analysis_started_at=job.analysis_started_at,
+            on_http_attempt=lambda: self._persist_llm_http_attempt(job),
+            interrupt_check=interrupt_check,
         )
+        try:
+            with budget.activate():
+                budget.preflight()
+                analysis = self.pipeline.analyze(
+                    intake_id=intake.intake_id,
+                    source_filename=intake.source_filename,
+                    paper_pdf=paper_pdf,
+                    repository_url=intake.repository_url,
+                    goal=intake.user_goal,
+                    on_event=lambda event_type, payload: self._event(intake, event_type, payload),
+                    on_phase=lambda phase: self._set_phase(intake.intake_id, phase),
+                    on_checkpoint=lambda fields: self._checkpoint(intake.intake_id, fields),
+                    on_snapshot=self._register_snapshot,
+                    paper=intake.paper,
+                    paper_catalog=intake.paper_catalog,
+                    paper_document=intake.paper_document,
+                    repository_catalog=intake.repository_catalog,
+                    alignment_catalog=intake.alignment_catalog,
+                    repository_snapshot=snapshot,
+                )
+                intake = self.complete_analysis(intake.intake_id, analysis)
+        except AnalysisLLMBudgetExceeded as exc:
+            return self.fail_analysis(
+                intake.intake_id, error_code=ANALYSIS_LLM_BUDGET_EXCEEDED,
+                error_message=str(exc), failed_phase=self._current_phase(intake.intake_id),
+            )
+        except AnalysisTimeoutError as exc:
+            return self.fail_analysis(
+                intake.intake_id, error_code=ANALYSIS_TIMEOUT,
+                error_message=str(exc), failed_phase=self._current_phase(intake.intake_id),
+            )
+        return intake
+
+    def complete_analysis(self, intake_id: str, analysis: IntakeAnalysis, *, llm_call_count: int | None = None) -> ReproductionIntake:
+        intake = self.persistence.intakes.get(intake_id)
         if analysis.repository_snapshot is not None:
-            registry = getattr(self.persistence, "repository_snapshots", None)
-            if registry is None:
-                raise APIUseCaseError("production persistence omitted the repository snapshot registry")
-            registry.register(analysis.repository_snapshot)
-        session = self._create_session(intake, analysis)
+            self._register_snapshot(analysis.repository_snapshot)
+        persisted = intake.llm_call_count if llm_call_count is None else max(intake.llm_call_count, llm_call_count)
         intake = intake.model_copy(update={
-            "session_id": session.session_id,
-            "paper": analysis.paper, "paper_catalog": analysis.paper_catalog,
+            "paper": analysis.paper,
+            "paper_document": analysis.paper_document,
+            "paper_catalog": analysis.paper_catalog,
             "repository_catalog": analysis.repository_catalog,
             "alignment_catalog": analysis.alignment_catalog,
-            "goal_resolution": analysis.goal_resolution, "updated_at": datetime.now(timezone.utc),
+            "goal_resolution": analysis.goal_resolution,
+            "llm_call_count": persisted,
+            "updated_at": datetime.now(timezone.utc),
         })
+        session = self._upsert_session(intake, analysis)
+        intake = intake.model_copy(update={"session_id": session.session_id, "updated_at": datetime.now(timezone.utc)})
+        self.persistence.intakes.update(intake)
         if hasattr(self.persistence.events, "bind_session"):
             self.persistence.events.bind_session(intake.intake_id, session.session_id)
         return self._continue_after_goal(intake, session=session)
+
+    def fail_analysis(
+        self, intake_id: str, *, error_code: str, error_message: str,
+        failed_phase: IntakeAnalysisPhase | None = None, llm_call_count: int | None = None,
+    ) -> ReproductionIntake:
+        intake = self.persistence.intakes.get(intake_id)
+        if intake.state in {ReproductionIntakeState.FAILED, ReproductionIntakeState.TERMINAL, ReproductionIntakeState.READY_TO_RUN}:
+            return intake
+        phase = failed_phase or intake.current_phase or IntakeAnalysisPhase.FAILED
+        persisted = intake.llm_call_count if llm_call_count is None else max(intake.llm_call_count, llm_call_count)
+        intake = intake.model_copy(update={
+            "state": ReproductionIntakeState.FAILED,
+            "current_phase": IntakeAnalysisPhase.FAILED,
+            "error_code": error_code,
+            "error_message": error_message,
+            "failed_phase": phase,
+            "waiting_reason": error_message,
+            "llm_call_count": persisted,
+            "updated_at": datetime.now(timezone.utc),
+        })
+        self.persistence.intakes.update(intake)
+        self._event(intake, ReproductionEventType.ANALYSIS_FAILED, {
+            "error_code": error_code,
+            "error_message": error_message,
+            "failed_phase": phase.value,
+        })
+        return intake
 
     def clarify(self, intake_id: str, *, principal: str, answers: tuple[str, ...]):
         intake = self._owned_intake(intake_id, principal)
         if intake.state is not ReproductionIntakeState.AMBIGUOUS:
             raise InvalidIntakeStateError("intake is not waiting for clarification")
-        resolution = self.pipeline.clarify(intake=intake, answers=answers)
-        resolved_goal = (
-            resolution.selection.original_user_goal
-            if resolution.selection is not None
-            else intake.user_goal
-        )
+        if self.analysis_queue is None or self.paper_artifacts is None:
+            raise APIUseCaseError("production persistence omitted the intake analysis queue")
+        now = datetime.now(timezone.utc)
+        enriched = intake.user_goal + "\nUser clarification:\n" + "\n".join(answers)
         intake = intake.model_copy(update={
-            "goal_resolution": resolution,
-            "user_goal": resolved_goal,
+            "user_goal": enriched,
             "clarification_answers": (*intake.clarification_answers, *answers),
             "state": ReproductionIntakeState.ANALYZING,
+            "current_phase": IntakeAnalysisPhase.GOAL_RESOLVING,
             "waiting_reason": None,
-            "updated_at": datetime.now(timezone.utc),
+            "error_code": None,
+            "error_message": None,
+            "failed_phase": None,
+            "updated_at": now,
         })
-        return self._continue_after_goal(intake, session=self._session_for_intake(intake))
+        self.persistence.intakes.update(intake)
+        artifact_uri = self.paper_artifacts.uri_for(intake.intake_id)
+        self.analysis_queue.enqueue_for_clarification(
+            IntakeAnalysisJob(
+                job_id=f"analysis:{intake.intake_id}",
+                intake_id=intake.intake_id,
+                owner_principal=intake.owner_principal,
+                status=AnalysisJobStatus.QUEUED,
+                paper_artifact_uri=artifact_uri,
+                max_attempts=self.analysis_settings.max_job_attempts,
+                enqueued_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        return intake
 
     def submit_resource(self, intake_id: str, *, principal: str, requirement_id: str, host_path: str):
         intake = self._owned_intake(intake_id, principal)
@@ -177,6 +364,13 @@ class ReproductionAPIService:
         if intake.state is not ReproductionIntakeState.READY_TO_RUN or intake.job_id is None:
             raise InvalidIntakeStateError("intake is not ready to run")
         return self._enqueue_job(intake.job_id, intake=intake, session=self._session_for_intake(intake))
+
+    def list_intakes(self, *, principal: str):
+        return self.persistence.intakes.list_by_owner(principal)
+
+    def intake_events(self, intake_id: str, *, principal: str, after_sequence: int = 0):
+        self._owned_intake(intake_id, principal)
+        return self.persistence.events.list_by_intake(intake_id, after_sequence=after_sequence)
 
     def get_intake(self, intake_id: str, *, principal: str):
         intake = self._owned_intake(intake_id, principal)
@@ -265,6 +459,8 @@ class ReproductionAPIService:
         session = self._owned_session(session_id, principal)
         if not goal and not experiment_ids:
             raise InvalidSessionStateError("append requires a goal or explicit experiment ids")
+        if session.repository_catalog is None:
+            raise InvalidSessionStateError("session cannot append experiments before repository analysis")
         if session.pending_job_id is not None:
             pending = self.persistence.jobs.get(session.pending_job_id)
             if pending.status is ReproductionJobStatus.READY and self._same_append_request(pending, goal, experiment_ids):
@@ -365,9 +561,18 @@ class ReproductionAPIService:
         resolution = intake.goal_resolution
         if resolution is None:
             raise APIUseCaseError("analysis omitted goal resolution")
+        if resolution.status is GoalResolutionStatus.NOT_FOUND:
+            return self.fail_analysis(
+                intake.intake_id,
+                error_code=GOAL_NOT_FOUND,
+                error_message=resolution.reason or "requested experiments were not found",
+                failed_phase=IntakeAnalysisPhase.GOAL_RESOLVING,
+                llm_call_count=intake.llm_call_count,
+            )
         if resolution.status is not GoalResolutionStatus.RESOLVED:
             intake = intake.model_copy(update={
                 "state": ReproductionIntakeState.AMBIGUOUS,
+                "current_phase": IntakeAnalysisPhase.WAITING_FOR_CLARIFICATION,
                 "waiting_reason": resolution.reason or "clarification is required",
                 "updated_at": datetime.now(timezone.utc),
             })
@@ -386,6 +591,8 @@ class ReproductionAPIService:
         self._event(intake, ReproductionEventType.EXPERIMENT_SELECTION_RESOLVED, {
             "selected_experiment_ids": list(resolution.selection.selected_experiment_ids),
         })
+        if intake.repository_catalog is None or intake.alignment_catalog is None:
+            raise APIUseCaseError("resolved analysis omitted repository or alignment catalogs")
         report = self.resource_service.resolve(
             intake_id=intake.intake_id, principal=intake.owner_principal,
             selection=resolution.selection, specification=resolution.specification,
@@ -425,6 +632,11 @@ class ReproductionAPIService:
         if intake.resource_resolution is None or not intake.resource_resolution.ready_to_run:
             raise InvalidIntakeStateError("planning requires all external resources to be available")
         self._event(intake, ReproductionEventType.PLANNING_STARTED, {})
+        intake = intake.model_copy(update={
+            "current_phase": IntakeAnalysisPhase.PREPARING,
+            "updated_at": datetime.now(timezone.utc),
+        })
+        self.persistence.intakes.update(intake)
         plan = self.pipeline.plan(
             intake=intake,
             specification=intake.goal_resolution.specification,
@@ -470,6 +682,7 @@ class ReproductionAPIService:
         intake = intake.model_copy(update={
             "execution_plan": plan, "job_id": job_id,
             "state": ReproductionIntakeState.READY_TO_RUN, "waiting_reason": None,
+            "current_phase": IntakeAnalysisPhase.READY_TO_RUN,
             "updated_at": datetime.now(timezone.utc),
         })
         self.persistence.intakes.update(intake)
@@ -601,33 +814,110 @@ class ReproductionAPIService:
         self._event(intake, ReproductionEventType.JOB_QUEUED, {"status": job.status.value}, job_id=job.job_id, session_id=None if session is None else session.session_id)
         return job
 
-    def _create_session(self, intake: ReproductionIntake, analysis: IntakeAnalysis) -> ReproductionSession:
+    def _upsert_session(self, intake: ReproductionIntake, analysis: IntakeAnalysis) -> ReproductionSession:
+        existing = self._session_for_intake(intake)
         snapshot = analysis.repository_snapshot
-        if snapshot is None:
-            raise APIUseCaseError("analysis omitted a repository snapshot required to lock the session")
         document = analysis.paper_document
         paper_hash = document.content_hash if document is not None else analysis.paper.id
-        session = ReproductionSession(
-            session_id=f"session:{uuid.uuid4().hex}",
-            owner_principal=intake.owner_principal,
-            origin_intake_id=intake.intake_id,
-            source_filename=intake.source_filename,
-            repository_url=intake.repository_url,
-            paper=analysis.paper,
-            paper_content_hash=paper_hash,
-            paper_document=document,
-            paper_catalog=analysis.paper_catalog,
-            repository_catalog=analysis.repository_catalog,
-            alignment_catalog=analysis.alignment_catalog,
-            repository_snapshot_id=snapshot.snapshot_id,
-            repository_commit_sha=snapshot.resolved_commit_sha,
-            pending_goal=intake.user_goal,
-            pending_goal_resolution=analysis.goal_resolution,
-        )
-        if not hasattr(self.persistence, "sessions"):
-            raise APIUseCaseError("production persistence omitted the reproduction session repository")
-        self.persistence.sessions.create(session)
+        if existing is None:
+            session = ReproductionSession(
+                session_id=f"session:{uuid.uuid4().hex}",
+                owner_principal=intake.owner_principal,
+                origin_intake_id=intake.intake_id,
+                source_filename=intake.source_filename,
+                repository_url=intake.repository_url,
+                paper=analysis.paper,
+                paper_content_hash=paper_hash,
+                paper_document=document,
+                paper_catalog=analysis.paper_catalog,
+                repository_catalog=analysis.repository_catalog,
+                alignment_catalog=analysis.alignment_catalog,
+                repository_snapshot_id=None if snapshot is None else snapshot.snapshot_id,
+                repository_commit_sha=None if snapshot is None else snapshot.resolved_commit_sha,
+                pending_goal=intake.user_goal,
+                pending_goal_resolution=analysis.goal_resolution,
+                status=(
+                    ReproductionSessionStatus.AWAITING_CLARIFICATION
+                    if analysis.goal_resolution.status is not GoalResolutionStatus.RESOLVED
+                    else ReproductionSessionStatus.ACTIVE
+                ),
+            )
+            if not hasattr(self.persistence, "sessions"):
+                raise APIUseCaseError("production persistence omitted the reproduction session repository")
+            self.persistence.sessions.create(session)
+            return session
+        updates = {
+            "paper": analysis.paper,
+            "paper_content_hash": paper_hash,
+            "paper_document": document,
+            "paper_catalog": analysis.paper_catalog,
+            "pending_goal": intake.user_goal,
+            "pending_goal_resolution": analysis.goal_resolution,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        if analysis.repository_catalog is not None:
+            updates["repository_catalog"] = analysis.repository_catalog
+        if analysis.alignment_catalog is not None:
+            updates["alignment_catalog"] = analysis.alignment_catalog
+        if snapshot is not None:
+            updates["repository_snapshot_id"] = snapshot.snapshot_id
+            updates["repository_commit_sha"] = snapshot.resolved_commit_sha
+        session = existing.model_copy(update=updates)
+        self.persistence.sessions.update(session)
         return session
+
+    def _create_session(self, intake: ReproductionIntake, analysis: IntakeAnalysis) -> ReproductionSession:
+        return self._upsert_session(intake, analysis)
+
+    def _set_phase(self, intake_id: str, phase: IntakeAnalysisPhase) -> None:
+        intake = self.persistence.intakes.get(intake_id)
+        intake = intake.model_copy(update={
+            "current_phase": phase, "updated_at": datetime.now(timezone.utc),
+        })
+        self.persistence.intakes.update(intake)
+
+    def _checkpoint(self, intake_id: str, fields: dict) -> None:
+        allowed = set(ReproductionIntake.model_fields)
+        intake = self.persistence.intakes.get(intake_id)
+        payload = {
+            key: value for key, value in fields.items()
+            if value is not None and key in allowed
+        }
+        payload["updated_at"] = datetime.now(timezone.utc)
+        self.persistence.intakes.update(intake.model_copy(update=payload))
+
+    def _register_snapshot(self, snapshot: RepositorySnapshot) -> None:
+        registry = getattr(self.persistence, "repository_snapshots", None)
+        if registry is None:
+            raise APIUseCaseError("production persistence omitted the repository snapshot registry")
+        registry.register(snapshot)
+
+    def _load_repository_snapshot(self, snapshot_id: str) -> RepositorySnapshot | None:
+        registry = getattr(self.persistence, "repository_snapshots", None)
+        if registry is None or not hasattr(registry, "get"):
+            return None
+        try:
+            return registry.get(snapshot_id)
+        except PersistenceEntityNotFoundError:
+            return None
+
+    def _persist_llm_http_attempt(self, job: IntakeAnalysisJob) -> int:
+        try:
+            updated = self.analysis_queue.record_llm_http_attempt(
+                job.job_id, job.worker_id, job.lease_token,
+                max_phase_calls=self.analysis_settings.max_llm_calls,
+            )
+        except AnalysisJobLeaseLostError as exc:
+            raise AnalysisLeaseLostError(str(exc)) from exc
+        intake = self.persistence.intakes.get(job.intake_id)
+        self.persistence.intakes.update(intake.model_copy(update={
+            "llm_call_count": max(intake.llm_call_count, updated.lifetime_llm_call_count),
+            "updated_at": datetime.now(timezone.utc),
+        }))
+        return updated.llm_call_count
+
+    def _current_phase(self, intake_id: str) -> IntakeAnalysisPhase:
+        return self.persistence.intakes.get(intake_id).current_phase
 
     def _set_session_pending(
         self, session: ReproductionSession, intake: ReproductionIntake, *,

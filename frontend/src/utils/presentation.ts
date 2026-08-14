@@ -2,6 +2,13 @@ import dayjs from "dayjs";
 
 const labels: Record<string, string> = {
   analyzing: "分析中",
+  paper_parsing: "解析论文",
+  paper_extracting: "提取实验",
+  goal_resolving: "解析目标",
+  waiting_for_clarification: "等待澄清",
+  repository_analyzing: "分析仓库",
+  aligning: "论文代码对齐",
+  preparing: "准备计划",
   ambiguous: "待确认",
   waiting_for_resource: "等待资源",
   awaiting_clarification: "待确认",
@@ -71,7 +78,7 @@ export function isTerminal(status?: string): boolean {
 
 export function statusTone(status?: string): "success" | "processing" | "warning" | "error" | "default" {
   if (["succeeded", "ready", "ready_to_run", "available", "completed", "active"].includes(status ?? "")) return "success";
-  if (["running", "queued", "claimed", "analyzing", "planning"].includes(status ?? "")) return "processing";
+  if (["running", "queued", "claimed", "analyzing", "planning", "paper_parsing", "paper_extracting", "goal_resolving", "repository_analyzing", "aligning", "preparing"].includes(status ?? "")) return "processing";
   if (["waiting_for_resource", "awaiting_clarification", "ambiguous", "cancel_requested", "missing", "unavailable", "not_selected"].includes(status ?? "")) return "warning";
   if (["failed", "cancelled", "invalid"].includes(status ?? "")) return "error";
   return "default";

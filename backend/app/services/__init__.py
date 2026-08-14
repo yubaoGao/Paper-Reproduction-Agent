@@ -49,12 +49,15 @@ from .external_resources import (
     ResourceAwareReproductionIntakeService,
 )
 from .reproduction_api import (
-    APIUseCaseError,EntityNotFoundError,IntakeAnalysis,InvalidIntakeStateError,
+    APIUseCaseError,EntityNotFoundError,IntakeAnalysis,IntakeBootstrapError,InvalidIntakeStateError,
     InvalidSessionStateError,
     PlanningBlockedError,ReproductionAnalysisPipeline,ReproductionAPIService,
 )
 from .product_events import ProductEventPublisher
 from .job_finalization import JobFinalizationError,JobResultFinalizer
+from .analysis_queue import IntakeAnalysisQueue,InvalidAnalysisQueueTransition
+from .analysis_worker import IntakeAnalysisWorker
+from .paper_artifacts import FilesystemIntakePaperStore,IntakePaperArtifactStore
 
 __all__ = [
     "CompositePaperParser",
@@ -94,9 +97,12 @@ __all__ = [
     "ResourceRegistry","ResourceRegistryError","ResourcesNotReadyError",
     "ResolvedExternalResourceProvider",
     "ResourceAwareReproductionIntakeService",
-    "APIUseCaseError","EntityNotFoundError","IntakeAnalysis","InvalidIntakeStateError",
+    "APIUseCaseError","EntityNotFoundError","IntakeAnalysis","IntakeBootstrapError","InvalidIntakeStateError",
     "InvalidSessionStateError",
     "PlanningBlockedError","ReproductionAnalysisPipeline","ReproductionAPIService",
     "ProductEventPublisher",
     "JobFinalizationError","JobResultFinalizer",
+    "IntakeAnalysisQueue","InvalidAnalysisQueueTransition",
+    "IntakeAnalysisWorker",
+    "FilesystemIntakePaperStore","IntakePaperArtifactStore",
 ]

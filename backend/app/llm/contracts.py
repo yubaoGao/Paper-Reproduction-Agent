@@ -20,6 +20,7 @@ class LLMCallSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     timeout_seconds: float = Field(default=90.0, gt=0)
     max_retries: int = Field(default=2, ge=0, le=8)
+    max_structured_repairs: int = Field(default=1, ge=0, le=2)
     max_output_tokens: int = Field(default=8192, ge=128)
     temperature: float = Field(default=0.0, ge=0, le=2)
     thinking_enabled: bool | None = None
@@ -38,6 +39,24 @@ class LLMCallMetadata(BaseModel):
     retry_count: int = Field(default=0, ge=0)
     prompt_name: str
     prompt_version: str
+
+
+class LLMCallRecord(BaseModel):
+    """One billed HTTP attempt. Never includes API keys or prompt bodies."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    provider: str
+    model: str
+    role: LLMRole
+    stage: str | None = None
+    prompt_name: str
+    attempt: int = Field(default=0, ge=0)
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    elapsed_ms: float = Field(default=0, ge=0)
+    retry_reason: str | None = None
+    started_at: datetime
+    finished_at: datetime | None = None
 
 
 T = TypeVar("T", bound=BaseModel)
