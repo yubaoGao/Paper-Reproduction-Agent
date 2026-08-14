@@ -35,6 +35,7 @@ class ResourceRequirementResponse(APIModel):
 
 class IntakeResponse(APIModel):
     intake_id: str
+    session_id: str | None = None
     state: str
     goal: str
     repository_url: str
@@ -52,6 +53,7 @@ class IntakeResponse(APIModel):
 
 class JobSummaryResponse(APIModel):
     job_id: str
+    session_id: str | None = None
     goal: str
     selected_experiment_ids: tuple[str, ...]
     state: str
@@ -71,6 +73,52 @@ class JobSummaryResponse(APIModel):
     claimed_at: datetime | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
+
+
+class AppendExperimentsRequest(APIModel):
+    goal: str | None = Field(default=None, min_length=1, max_length=10_000)
+    experiment_ids: tuple[str, ...] | None = Field(default=None, max_length=128)
+
+
+class ExperimentJobHistoryResponse(APIModel):
+    job_id: str
+    goal: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class SessionExperimentResponse(APIModel):
+    experiment_id: str
+    name: str
+    experiment_type: str
+    status: str
+    current_job_id: str | None = None
+    job_history: tuple[ExperimentJobHistoryResponse, ...] = ()
+
+
+class SessionResponse(APIModel):
+    session_id: str
+    status: str
+    origin_intake_id: str
+    repository_url: str
+    repository_snapshot_id: str
+    repository_commit_sha: str
+    paper_content_hash: str
+    source_filename: str
+    goal: str | None = None
+    candidate_experiment_ids: tuple[str, ...] = ()
+    selected_experiment_ids: tuple[str, ...] = ()
+    clarification_questions: tuple[str, ...] = ()
+    required_resources: tuple[ResourceRequirementResponse, ...] = ()
+    planning_status: str | None = None
+    planning_blockers: tuple[dict[str, Any], ...] = ()
+    pending_job_id: str | None = None
+    waiting_reason: str | None = None
+    experiments: tuple[SessionExperimentResponse, ...] = ()
+    jobs: tuple[JobSummaryResponse, ...] = ()
+    created_at: datetime
+    updated_at: datetime
 
 
 class ErrorResponse(APIModel):

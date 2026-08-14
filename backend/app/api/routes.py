@@ -7,8 +7,11 @@ from fastapi.responses import StreamingResponse
 
 from .auth import Principal
 from .dependencies import get_api_service, get_principal
-from .presenters import present_intake, present_job
-from .schemas import ClarificationRequest, IntakeResponse, JobSummaryResponse, ResourceSubmissionRequest
+from .presenters import present_intake, present_job, present_session
+from .schemas import (
+    AppendExperimentsRequest, ClarificationRequest, IntakeResponse,
+    JobSummaryResponse, ResourceSubmissionRequest, SessionResponse,
+)
 from .github_repository_url import GitHubRepositoryUrlError, normalize_github_repository_url
 from .sse import stream_job_events
 
@@ -78,6 +81,61 @@ def submit_resource(intake_id: str, body: ResourceSubmissionRequest, principal: 
 @router.post("/intakes/{intake_id}/start", response_model=JobSummaryResponse, status_code=202)
 def start_intake(intake_id: str, principal: Principal = Depends(get_principal), service=Depends(get_api_service)):
     job = service.start(intake_id, principal=principal.principal_id)
+    return present_job(job)
+
+
+@router.get("/sessions", response_model=tuple[SessionResponse, ...])
+def list_sessions(principal: Principal = Depends(get_principal), service=Depends(get_api_service)):
+    return tuple(
+        present_session(item) for item in service.list_sessions(principal=principal.principal_id)
+    )
+
+
+@router.get("/sessions/{session_id}", response_model=SessionResponse)
+def get_session(session_id: str, principal: Principal = Depends(get_principal), service=Depends(get_api_service)):
+    session, jobs, experiments, _events = service.get_session(session_id, principal=principal.principal_id)
+    return present_session(session, jobs=jobs, experiments=experiments)
+
+
+@router.post("/sessions/{session_id}/experiments", response_model=SessionResponse)
+def append_session_experiments(
+    session_id: str, body: AppendExperimentsRequest,
+    principal: Principal = Depends(get_principal), service=Depends(get_api_service),
+):
+    session, _job = service.append_experiments(
+        session_id, principal=principal.principal_id,
+        goal=body.goal, experiment_ids=body.experiment_ids,
+    )
+    loaded, jobs, experiments, _events = service.get_session(session.session_id, principal=principal.principal_id)
+    return present_session(loaded, jobs=jobs, experiments=experiments)
+
+
+@router.post("/sessions/{session_id}/clarifications", response_model=SessionResponse)
+def clarify_session(
+    session_id: str, body: ClarificationRequest,
+    principal: Principal = Depends(get_principal), service=Depends(get_api_service),
+):
+    session, _job = service.clarify_session(session_id, principal=principal.principal_id, answers=body.answers)
+    loaded, jobs, experiments, _events = service.get_session(session.session_id, principal=principal.principal_id)
+    return present_session(loaded, jobs=jobs, experiments=experiments)
+
+
+@router.post("/sessions/{session_id}/resources", response_model=SessionResponse)
+def submit_session_resource(
+    session_id: str, body: ResourceSubmissionRequest,
+    principal: Principal = Depends(get_principal), service=Depends(get_api_service),
+):
+    session, _job = service.submit_session_resource(
+        session_id, principal=principal.principal_id,
+        requirement_id=body.requirement_id, host_path=body.host_path,
+    )
+    loaded, jobs, experiments, _events = service.get_session(session.session_id, principal=principal.principal_id)
+    return present_session(loaded, jobs=jobs, experiments=experiments)
+
+
+@router.post("/sessions/{session_id}/start", response_model=JobSummaryResponse, status_code=202)
+def start_session(session_id: str, principal: Principal = Depends(get_principal), service=Depends(get_api_service)):
+    job = service.start_session(session_id, principal=principal.principal_id)
     return present_job(job)
 
 

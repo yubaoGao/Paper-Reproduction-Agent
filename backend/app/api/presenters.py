@@ -2,37 +2,46 @@
 
 from __future__ import annotations
 
-from backend.app.domain import ReproductionJobStatus
+from .schemas import (
+    ExperimentJobHistoryResponse,
+    IntakeResponse,
+    JobSummaryResponse,
+    ResourceRequirementResponse,
+    SessionExperimentResponse,
+    SessionResponse,
+)
 
-from .schemas import IntakeResponse, JobSummaryResponse, ResourceRequirementResponse
+
+def _resource_responses(resolution) -> tuple[ResourceRequirementResponse, ...]:
+    if resolution is None:
+        return ()
+    return tuple(
+        ResourceRequirementResponse(
+            requirement_id=item.requirement.requirement_id,
+            resource_name=item.requirement.canonical_name,
+            resource_type=item.requirement.resource_type.value,
+            required=item.requirement.required,
+            status=item.status.value,
+            preparation_hints=() if item.preparation_hint is None else item.preparation_hint.repository_instructions,
+            source_urls=() if item.preparation_hint is None else item.preparation_hint.source_urls,
+            expected_structure=item.requirement.expected_structure,
+            messages=item.messages,
+        )
+        for item in resolution.resolutions
+    )
 
 
 def present_intake(intake):
     goal = intake.goal_resolution
     selection = None if goal is None else goal.selection
-    resources = ()
-    if intake.resource_resolution is not None:
-        resources = tuple(
-            ResourceRequirementResponse(
-                requirement_id=item.requirement.requirement_id,
-                resource_name=item.requirement.canonical_name,
-                resource_type=item.requirement.resource_type.value,
-                required=item.requirement.required,
-                status=item.status.value,
-                preparation_hints=() if item.preparation_hint is None else item.preparation_hint.repository_instructions,
-                source_urls=() if item.preparation_hint is None else item.preparation_hint.source_urls,
-                expected_structure=item.requirement.expected_structure,
-                messages=item.messages,
-            )
-            for item in intake.resource_resolution.resolutions
-        )
     return IntakeResponse(
-        intake_id=intake.intake_id, state=intake.state.value, goal=intake.user_goal,
+        intake_id=intake.intake_id, session_id=intake.session_id,
+        state=intake.state.value, goal=intake.user_goal,
         repository_url=intake.repository_url,
         candidate_experiment_ids=() if goal is None else goal.candidate_experiment_ids,
         selected_experiment_ids=() if selection is None else selection.selected_experiment_ids,
         clarification_questions=() if goal is None else goal.clarification_questions,
-        required_resources=resources,
+        required_resources=_resource_responses(intake.resource_resolution),
         planning_status=None if intake.execution_plan is None else intake.execution_plan.status.value,
         planning_blockers=() if intake.execution_plan is None else tuple({
             "code": item.code, "message": item.message,
@@ -62,24 +71,13 @@ def present_job(job, *, runs=(), intake=None, events=()):
     requirements = () if intake is None or intake.execution_plan is None else tuple(
         item.resource_requirement.model_dump(mode="json") for item in intake.execution_plan.experiments
     )
-    resource_summaries = ()
-    if intake is not None and intake.resource_resolution is not None:
-        resource_summaries = tuple(
-            ResourceRequirementResponse(
-                requirement_id=item.requirement.requirement_id,
-                resource_name=item.requirement.canonical_name,
-                resource_type=item.requirement.resource_type.value,
-                required=item.requirement.required, status=item.status.value,
-                expected_structure=item.requirement.expected_structure,
-                messages=item.messages,
-            ) for item in intake.resource_resolution.resolutions
-        )
+    resource_summaries = _resource_responses(None if intake is None else intake.resource_resolution)
     epoch = next((item for item in reversed(events) if item.event_type.value == "EPOCH_PROGRESS"), None)
     progress = {"completed_steps": done, "total_steps": len(steps)}
     if epoch is not None:
         progress.update(epoch.payload)
     return JobSummaryResponse(
-        job_id=job.job_id, goal=job.user_goal,
+        job_id=job.job_id, session_id=job.session_id, goal=job.user_goal,
         selected_experiment_ids=job.selection.selected_experiment_ids,
         state=job.status.value, current_action=current or latest_action,
         progress=progress,
@@ -93,4 +91,50 @@ def present_job(job, *, runs=(), intake=None, events=()):
         enqueued_at=job.enqueued_at, claimed_at=job.claimed_at,
         started_at=None if latest is None else latest.started_at,
         finished_at=None if latest is None else latest.finished_at,
+    )
+
+
+def present_session(session, *, jobs=(), experiments=(), events=()):
+    goal = session.pending_goal_resolution
+    selection = None if goal is None else goal.selection
+    plan = session.pending_execution_plan
+    job_summaries = tuple(present_job(job) for job in jobs)
+    return SessionResponse(
+        session_id=session.session_id, status=session.status.value,
+        origin_intake_id=session.origin_intake_id,
+        repository_url=session.repository_url,
+        repository_snapshot_id=session.repository_snapshot_id,
+        repository_commit_sha=session.repository_commit_sha,
+        paper_content_hash=session.paper_content_hash,
+        source_filename=session.source_filename,
+        goal=session.pending_goal,
+        candidate_experiment_ids=() if goal is None else goal.candidate_experiment_ids,
+        selected_experiment_ids=() if selection is None else selection.selected_experiment_ids,
+        clarification_questions=() if goal is None else goal.clarification_questions,
+        required_resources=_resource_responses(session.pending_resource_resolution),
+        planning_status=None if plan is None else plan.status.value,
+        planning_blockers=() if plan is None else tuple({
+            "code": item.code, "message": item.message,
+            "paper_experiment_id": item.paper_experiment_id,
+        } for item in plan.blockers),
+        pending_job_id=session.pending_job_id,
+        waiting_reason=None if goal is None else goal.reason,
+        experiments=tuple(
+            SessionExperimentResponse(
+                experiment_id=item.experiment_id, name=item.name,
+                experiment_type=item.experiment_type, status=item.status.value,
+                current_job_id=item.current_job_id,
+                job_history=tuple(
+                    ExperimentJobHistoryResponse(
+                        job_id=history.job_id, goal=history.goal,
+                        status=history.status.value,
+                        created_at=history.created_at, updated_at=history.updated_at,
+                    )
+                    for history in item.job_history
+                ),
+            )
+            for item in experiments
+        ),
+        jobs=job_summaries,
+        created_at=session.created_at, updated_at=session.updated_at,
     )

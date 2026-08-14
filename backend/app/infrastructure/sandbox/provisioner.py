@@ -67,6 +67,9 @@ class EnvironmentProvisioner:
             raise EnvironmentProvisioningError("sandbox-private venv creation failed")
         if not plan.required_downloads:
             return
+        offline = bool(seed_directories) and (
+            plan.strategy is EnvironmentReuseStrategy.SEEDED_FROM_PACKAGE_CACHE
+        )
         argv = (
             "-m",
             "pip",
@@ -75,6 +78,7 @@ class EnvironmentProvisioner:
             "--no-input",
             "--cache-dir",
             "/cache/pip",
+            *(("--no-index",) if offline else ()),
             *(value for target in seed_directories for value in ("--find-links", target)),
             *plan.required_downloads,
         )

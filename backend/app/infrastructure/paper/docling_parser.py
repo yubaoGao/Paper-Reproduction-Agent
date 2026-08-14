@@ -239,7 +239,7 @@ class DoclingPaperParser(PaperParser):
             section_blocks = [candidate for _candidate_item, candidate in ordered_blocks[start_position:end_position]]
             sections.append(
                 SectionBlock(
-                    section_id=self._section_id(block.text, index),
+                    section_id=str(index),
                     title=block.text,
                     level=max(1, int(getattr(item, "level", 1) or 1)),
                     text="\n".join(candidate.text for candidate in section_blocks if candidate.text),
@@ -311,10 +311,3 @@ class DoclingPaperParser(PaperParser):
         if isinstance(value, tuple):
             return " / ".join(str(part).strip() for part in value if str(part).strip())
         return str(value).strip()
-
-    @staticmethod
-    def _section_id(title: str, index: int) -> str:
-        prefix = title.split(maxsplit=1)[0].rstrip(".)") if title else ""
-        if prefix and all(part.isdigit() for part in prefix.split(".")):
-            return prefix
-        return str(index)

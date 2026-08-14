@@ -13,6 +13,21 @@ class PersistenceBase(DeclarativeBase):
     pass
 
 
+class ReproductionSessionRow(PersistenceBase):
+    __tablename__ = "reproduction_sessions"
+
+    session_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    owner_principal: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    origin_intake_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    repository_snapshot_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    repository_commit_sha: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    paper_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class ReproductionJobRow(PersistenceBase):
     __tablename__ = "reproduction_jobs"
     __table_args__ = (
@@ -21,6 +36,9 @@ class ReproductionJobRow(PersistenceBase):
 
     job_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     owner_principal: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("reproduction_sessions.session_id", ondelete="SET NULL"), index=True
+    )
     paper_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     paper_title: Mapped[str] = mapped_column(Text, nullable=False)
     user_goal: Mapped[str] = mapped_column(Text, nullable=False)
@@ -44,6 +62,9 @@ class ReproductionIntakeRow(PersistenceBase):
 
     intake_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     owner_principal: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("reproduction_sessions.session_id", ondelete="SET NULL"), index=True
+    )
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     job_id: Mapped[str | None] = mapped_column(
         ForeignKey("reproduction_jobs.job_id", ondelete="SET NULL"), unique=True, index=True
@@ -64,6 +85,9 @@ class ReproductionEventRow(PersistenceBase):
     event_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     intake_id: Mapped[str] = mapped_column(
         ForeignKey("reproduction_intakes.intake_id", ondelete="CASCADE"), nullable=False
+    )
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("reproduction_sessions.session_id", ondelete="SET NULL"), index=True
     )
     job_id: Mapped[str | None] = mapped_column(
         ForeignKey("reproduction_jobs.job_id", ondelete="CASCADE")

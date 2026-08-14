@@ -23,6 +23,7 @@ from backend.app.domain import (
     ReproductionJob,
     ReproductionJobStatus,
     ReproductionRun,
+    ReproductionSession,
     ResultValidationStatus,
     RunStatus,
     ReproductionEvent,
@@ -43,6 +44,7 @@ from .models import (
     ReproductionIntakeRow,
     ReproductionEventRow,
     ReproductionRunRow,
+    ReproductionSessionRow,
     StepRunRow,
 )
 from .serialization import deserialize_domain, serialize_domain
@@ -119,6 +121,15 @@ class PostgresReproductionJobRepository(_Repository):
         with self._read() as session:
             return tuple(_job_from_row(row) for row in session.scalars(statement))
 
+    def list_by_session(self, session_id: str) -> tuple[ReproductionJob, ...]:
+        statement = (
+            select(ReproductionJobRow)
+            .where(ReproductionJobRow.session_id == session_id)
+            .order_by(ReproductionJobRow.created_at, ReproductionJobRow.job_id)
+        )
+        with self._read() as session:
+            return tuple(_job_from_row(row) for row in session.scalars(statement))
+
 
 class PostgresReproductionIntakeRepository(_Repository):
     def create(self, intake: ReproductionIntake) -> None:
@@ -127,6 +138,7 @@ class PostgresReproductionIntakeRepository(_Repository):
                 session.add(ReproductionIntakeRow(
                     intake_id=intake.intake_id,
                     owner_principal=intake.owner_principal,
+                    session_id=intake.session_id,
                     state=intake.state.value,
                     job_id=intake.job_id,
                     intake_json=serialize_domain(intake),
@@ -151,6 +163,7 @@ class PostgresReproductionIntakeRepository(_Repository):
                 .where(ReproductionIntakeRow.intake_id == intake.intake_id)
                 .values(
                     owner_principal=intake.owner_principal,
+                    session_id=intake.session_id,
                     state=intake.state.value,
                     job_id=intake.job_id,
                     intake_json=serialize_domain(intake),
@@ -170,18 +183,85 @@ class PostgresReproductionIntakeRepository(_Repository):
             return tuple(deserialize_domain(row.intake_json, ReproductionIntake) for row in session.scalars(statement))
 
 
+class PostgresReproductionSessionRepository(_Repository):
+    def create(self, session: ReproductionSession) -> None:
+        try:
+            with self._write() as db:
+                db.add(ReproductionSessionRow(
+                    session_id=session.session_id,
+                    owner_principal=session.owner_principal,
+                    origin_intake_id=session.origin_intake_id,
+                    status=session.status.value,
+                    repository_snapshot_id=session.repository_snapshot_id,
+                    repository_commit_sha=session.repository_commit_sha,
+                    paper_content_hash=session.paper_content_hash,
+                    session_json=serialize_domain(session),
+                    created_at=session.created_at,
+                    updated_at=session.updated_at,
+                ))
+                db.flush()
+        except IntegrityError as exc:
+            raise self._conflict(f"session {session.session_id!r}", exc) from exc
+
+    def get(self, session_id: str) -> ReproductionSession:
+        with self._read() as db:
+            row = db.get(ReproductionSessionRow, session_id)
+            if row is None:
+                raise PersistenceEntityNotFoundError(f"unknown reproduction session {session_id!r}")
+            return deserialize_domain(row.session_json, ReproductionSession)
+
+    def get_by_intake(self, intake_id: str) -> ReproductionSession | None:
+        statement = select(ReproductionSessionRow).where(
+            ReproductionSessionRow.origin_intake_id == intake_id
+        )
+        with self._read() as db:
+            row = db.scalars(statement).first()
+            return None if row is None else deserialize_domain(row.session_json, ReproductionSession)
+
+    def update(self, session: ReproductionSession) -> None:
+        with self._write() as db:
+            result = db.execute(
+                update(ReproductionSessionRow)
+                .where(ReproductionSessionRow.session_id == session.session_id)
+                .values(
+                    owner_principal=session.owner_principal,
+                    origin_intake_id=session.origin_intake_id,
+                    status=session.status.value,
+                    repository_snapshot_id=session.repository_snapshot_id,
+                    repository_commit_sha=session.repository_commit_sha,
+                    paper_content_hash=session.paper_content_hash,
+                    session_json=serialize_domain(session),
+                    updated_at=session.updated_at,
+                )
+            )
+            if result.rowcount != 1:
+                raise PersistenceEntityNotFoundError(f"unknown reproduction session {session.session_id!r}")
+
+    def list_by_owner(self, owner_principal: str) -> tuple[ReproductionSession, ...]:
+        statement = (
+            select(ReproductionSessionRow)
+            .where(ReproductionSessionRow.owner_principal == owner_principal)
+            .order_by(ReproductionSessionRow.created_at, ReproductionSessionRow.session_id)
+        )
+        with self._read() as db:
+            return tuple(
+                deserialize_domain(row.session_json, ReproductionSession) for row in db.scalars(statement)
+            )
+
+
 class PostgresReproductionEventRepository(_Repository):
-    def append(self, *, intake_id, owner_principal, event_type, payload, job_id=None):
+    def append(self, *, intake_id, owner_principal, event_type, payload, job_id=None, session_id=None):
         # Domain validation happens before inserting untrusted product payloads.
         draft = ReproductionEvent(
             event_id="pending:event", sequence=1, intake_id=intake_id,
-            job_id=job_id, owner_principal=owner_principal,
+            session_id=session_id, job_id=job_id, owner_principal=owner_principal,
             event_type=event_type, payload=payload,
         )
         with self._write() as session:
             row = ReproductionEventRow(
                 event_id=f"pending:{hashlib.sha256((intake_id + str(utc_now())).encode()).hexdigest()}",
-                intake_id=intake_id, job_id=job_id, owner_principal=owner_principal,
+                intake_id=intake_id, session_id=session_id, job_id=job_id,
+                owner_principal=owner_principal,
                 event_type=event_type.value, payload_json=draft.payload,
                 created_at=draft.created_at,
             )
@@ -200,11 +280,17 @@ class PostgresReproductionEventRepository(_Repository):
         )
 
     def list_by_job(self, job_id: str, *, after_sequence: int = 0):
-        # Include analysis events written before the durable job was created.
-        intake_id = select(ReproductionIntakeRow.intake_id).where(ReproductionIntakeRow.job_id == job_id).scalar_subquery()
         return self._list(
             select(ReproductionEventRow).where(
-                ReproductionEventRow.intake_id == intake_id,
+                ReproductionEventRow.job_id == job_id,
+                ReproductionEventRow.sequence > after_sequence,
+            )
+        )
+
+    def list_by_session(self, session_id: str, *, after_sequence: int = 0):
+        return self._list(
+            select(ReproductionEventRow).where(
+                ReproductionEventRow.session_id == session_id,
                 ReproductionEventRow.sequence > after_sequence,
             )
         )
@@ -220,6 +306,17 @@ class PostgresReproductionEventRepository(_Repository):
                 .values(job_id=job_id)
             )
 
+    def bind_session(self, intake_id: str, session_id: str) -> None:
+        with self._write() as session:
+            session.execute(
+                update(ReproductionEventRow)
+                .where(
+                    ReproductionEventRow.intake_id == intake_id,
+                    ReproductionEventRow.session_id.is_(None),
+                )
+                .values(session_id=session_id)
+            )
+
     def _list(self, statement):
         with self._read() as session:
             rows = session.scalars(statement.order_by(ReproductionEventRow.sequence))
@@ -229,7 +326,7 @@ class PostgresReproductionEventRepository(_Repository):
     def _event(row):
         return ReproductionEvent(
             event_id=row.event_id, sequence=row.sequence, intake_id=row.intake_id,
-            job_id=row.job_id, owner_principal=row.owner_principal,
+            session_id=row.session_id, job_id=row.job_id, owner_principal=row.owner_principal,
             event_type=ReproductionEventType(row.event_type), payload=row.payload_json,
             created_at=row.created_at,
         )
@@ -528,6 +625,7 @@ class PostgresPersistenceUnitOfWork:
         self._session = self._session_factory()
         self._session.begin()
         self.jobs = PostgresReproductionJobRepository(self._session_factory, self._session)
+        self.sessions = PostgresReproductionSessionRepository(self._session_factory, self._session)
         self.intakes = PostgresReproductionIntakeRepository(self._session_factory, self._session)
         self.events = PostgresReproductionEventRepository(self._session_factory, self._session)
         self.planning_snapshots = PostgresPlanningSnapshotRepository(self._session_factory, self._session)
@@ -574,6 +672,7 @@ class PostgresPersistence:
 
         self.session_factory = session_factory
         self.jobs = PostgresReproductionJobRepository(session_factory)
+        self.sessions = PostgresReproductionSessionRepository(session_factory)
         self.intakes = PostgresReproductionIntakeRepository(session_factory)
         self.events = PostgresReproductionEventRepository(session_factory)
         self.planning_snapshots = PostgresPlanningSnapshotRepository(session_factory)
@@ -608,6 +707,7 @@ class PostgresProductPersistence:
         from .resource_registry import PostgresResourceRegistry
 
         self.session_factory = session_factory
+        self.sessions = PostgresReproductionSessionRepository(session_factory)
         self.intakes = PostgresReproductionIntakeRepository(session_factory)
         self.events = PostgresReproductionEventRepository(session_factory)
         self.jobs = PostgresReproductionJobRepository(session_factory)
@@ -625,6 +725,7 @@ class PostgresProductPersistence:
 def _job_values(job: ReproductionJob) -> dict:
     return {
         "owner_principal": job.owner_principal,
+        "session_id": job.session_id,
         "paper_id": job.paper.id,
         "paper_title": job.paper.title,
         "user_goal": job.user_goal,
@@ -652,6 +753,7 @@ def _job_from_row(row: ReproductionJobRow) -> ReproductionJob:
     payload = dict(row.job_json)
     payload.update(
         {
+            "session_id": row.session_id,
             "status": row.status,
             "enqueued_at": row.enqueued_at,
             "worker_id": row.worker_id,

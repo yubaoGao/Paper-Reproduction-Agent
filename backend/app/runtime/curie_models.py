@@ -94,6 +94,7 @@ class CurieExecutionContext(DomainModel):
     namespace: NonEmptyStr
     thread_id: NonEmptyStr
     execution_instruction: NonEmptyStr
+    owner_principal: NonEmptyStr = "system:anonymous"
 
 
 class WorkspaceReferences(DomainModel):

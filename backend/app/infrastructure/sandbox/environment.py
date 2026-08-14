@@ -23,6 +23,7 @@ from .models import (
     EnvironmentRegistrationMode,
     EnvironmentReuseStrategy,
     PackageCacheSource,
+    PreparedEnvironmentValidationState,
     SandboxEnvironmentPlan,
 )
 
@@ -39,6 +40,30 @@ class RegisteredEnvironment:
         self.resource_id = resource_id
 
 
+def canonical_sha256(content: dict) -> str:
+    """Deterministic content digest; never use the interpreter hash() builtin."""
+
+    payload = json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def dependency_specification_digest(requirement: EnvironmentRequirement) -> str:
+    return canonical_sha256(
+        {
+            "dependencies": sorted(requirement.dependencies),
+            "system_dependencies": sorted(requirement.system_dependencies),
+            "manifest_references": sorted(requirement.manifest_references),
+            "python_constraint": requirement.python_constraint,
+            "frameworks": sorted(item.casefold() for item in requirement.frameworks),
+            "cuda_hints": list(requirement.cuda_hints),
+        }
+    )
+
+
+def install_command_digest(commands: tuple[str, ...]) -> str:
+    return canonical_sha256({"install_commands": list(commands)})
+
+
 def environment_fingerprint(
     *,
     platform_name: str,
@@ -50,6 +75,9 @@ def environment_fingerprint(
     system_packages: dict[str, str] | None = None,
     cuda_runtime: str | None = None,
     abi: dict[str, str] | None = None,
+    base_image_digest: str | None = None,
+    dependency_specification_hash: str | None = None,
+    install_command_hash: str | None = None,
 ) -> EnvironmentFingerprint:
     content = {
         "platform": platform_name.casefold(),
@@ -61,11 +89,11 @@ def environment_fingerprint(
         "system_packages": dict(sorted((system_packages or {}).items())),
         "cuda_runtime": cuda_runtime,
         "abi": dict(sorted((abi or {}).items())),
+        "base_image_digest": base_image_digest,
+        "dependency_specification_hash": dependency_specification_hash,
+        "install_command_hash": install_command_hash,
     }
-    digest = hashlib.sha256(
-        json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    return EnvironmentFingerprint(**content, content_digest=f"sha256:{digest}")
+    return EnvironmentFingerprint(**content, content_digest=canonical_sha256(content))
 
 
 class StaticEnvironmentInspector:
@@ -239,7 +267,7 @@ class TrustedSystemPackageResolver:
 
 
 class EnvironmentBroker:
-    """Deterministic four-level resolution; agents cannot supply paths."""
+    """Deterministic five-level resolution; agents cannot supply paths."""
 
     def __init__(
         self,
@@ -252,6 +280,8 @@ class EnvironmentBroker:
         architecture: str = "x86_64",
         probe: Callable[[EnvironmentDescriptor], bool] | None = None,
         system_package_resolver: TrustedSystemPackageResolver | None = None,
+        asset_store=None,
+        build_wait_seconds: float = 1800,
     ) -> None:
         if "@sha256:" not in base_image_digest:
             raise ValueError("base image must be immutable and digest-pinned")
@@ -263,8 +293,16 @@ class EnvironmentBroker:
         self.architecture = architecture
         self.probe = probe
         self.system_package_resolver = system_package_resolver
+        self.asset_store = asset_store
+        self.build_wait_seconds = build_wait_seconds
 
-    def resolve(self, requirement: EnvironmentRequirement) -> SandboxEnvironmentPlan:
+    def resolve(
+        self,
+        requirement: EnvironmentRequirement,
+        *,
+        principal: str = "system:anonymous",
+        run_id: str | None = None,
+    ) -> SandboxEnvironmentPlan:
         desired = self._desired_fingerprint(requirement)
         image = next(
             (
@@ -283,31 +321,55 @@ class EnvironmentBroker:
                 image.environment_id,
                 CompatibilityStatus.COMPATIBLE,
                 "exact immutable image fingerprint match",
+                reuse_layer="trusted_image",
+                principal=principal,
             )
+
+        prepared = self._prepared_plan(desired, principal)
+        if prepared is not None:
+            return prepared
+        if self.asset_store is not None and self.asset_store.build_in_progress(principal, desired):
+            waited = self.asset_store.wait_for_published(
+                principal, desired, timeout_seconds=self.build_wait_seconds,
+            )
+            if waited is not None:
+                prepared = self._prepared_plan(desired, principal)
+                if prepared is not None:
+                    return prepared
 
         for record in self.catalog.records():
             result = self.compatibility(requirement, record.descriptor.fingerprint)
             if result.status is not CompatibilityStatus.COMPATIBLE:
                 continue
             descriptor = record.descriptor
-            if descriptor.artifact_type is not EnvironmentArtifactType.READ_ONLY_PREFIX:
+            if descriptor.artifact_type not in {
+                EnvironmentArtifactType.READ_ONLY_PREFIX,
+                EnvironmentArtifactType.PREPARED_ENVIRONMENT,
+            }:
+                continue
+            if descriptor.artifact_type is EnvironmentArtifactType.PREPARED_ENVIRONMENT:
                 continue
             result = CompatibilityResult(
                 status=CompatibilityStatus.PROBE_REQUIRED,
                 reasons=("read-only environment requires restricted sandbox probe",),
             )
-            if self.probe is None or not self.probe(descriptor):
+            if not self._probe_or_invalidate(descriptor):
                 continue
             return SandboxEnvironmentPlan(
                 strategy=EnvironmentReuseStrategy.REUSED_READ_ONLY_ENV,
                 base_image_digest=self.base_image_digest,
                 reused_environment_id=descriptor.environment_id,
                 environment_fingerprint=descriptor.fingerprint,
+                reused_mount_target="/opt/reused-env",
                 compatibility=CompatibilityResult(
                     status=CompatibilityStatus.COMPATIBLE,
                     reasons=("static match and restricted sandbox probe passed",),
                 ),
-                provenance={"reason": "exact registered read-only environment"},
+                provenance={
+                    "reason": "exact registered read-only environment",
+                    "reuse_layer": "admin_read_only_env",
+                    "owner_principal": principal,
+                },
             )
 
         downloads = tuple(requirement.dependencies)
@@ -320,19 +382,33 @@ class EnvironmentBroker:
             system_packages = self.system_package_resolver.resolve(
                 requirement.system_dependencies
             )
-        if self.package_caches:
+        cache_ids = self._matching_package_cache_ids(principal, desired)
+        lease = None
+        if self.asset_store is not None and run_id is not None:
+            lease = self.asset_store.try_begin_build(principal, desired, run_id)
+            if lease is None:
+                prepared = self._prepared_plan(desired, principal)
+                if prepared is not None:
+                    return prepared
+        if cache_ids:
             return SandboxEnvironmentPlan(
                 strategy=EnvironmentReuseStrategy.SEEDED_FROM_PACKAGE_CACHE,
                 base_image_digest=self.base_image_digest,
                 environment_fingerprint=desired,
-                package_cache_source_ids=tuple(item.cache_id for item in self.package_caches),
+                package_cache_source_ids=cache_ids,
                 required_downloads=downloads,
                 resolved_system_packages=system_packages,
                 compatibility=CompatibilityResult(
                     status=CompatibilityStatus.COMPATIBLE,
                     reasons=("build sandbox-private environment from read-only cache",),
                 ),
-                provenance={"reason": "no exact environment; approved cache available"},
+                provenance={
+                    "reason": "no exact environment; approved cache available",
+                    "reuse_layer": "package_cache_seed",
+                    "owner_principal": principal,
+                    "build_claimed": lease is not None,
+                    "build_run_id": run_id,
+                },
             )
         return SandboxEnvironmentPlan(
             strategy=EnvironmentReuseStrategy.BUILT_IN_SANDBOX,
@@ -344,8 +420,102 @@ class EnvironmentBroker:
                 status=CompatibilityStatus.COMPATIBLE,
                 reasons=("sandbox-local provisioning required",),
             ),
-            provenance={"reason": "cache miss; provision in sandbox-private storage"},
+            provenance={
+                "reason": "cache miss; provision in sandbox-private storage",
+                "reuse_layer": "built_in_sandbox",
+                "owner_principal": principal,
+                "build_claimed": lease is not None,
+                "build_run_id": run_id,
+            },
         )
+
+    def abort_build(self, plan: SandboxEnvironmentPlan, *, principal: str) -> None:
+        if self.asset_store is None:
+            return
+        run_id = plan.provenance.get("build_run_id")
+        if plan.provenance.get("build_claimed") and isinstance(run_id, str):
+            self.asset_store.abort_build(principal, plan.environment_fingerprint, run_id)
+
+    def complete_build(self, plan: SandboxEnvironmentPlan, *, principal: str) -> None:
+        if self.asset_store is None:
+            return
+        run_id = plan.provenance.get("build_run_id")
+        if plan.provenance.get("build_claimed") and isinstance(run_id, str):
+            self.asset_store.complete_build(principal, plan.environment_fingerprint, run_id)
+
+    def _prepared_plan(self, desired: EnvironmentFingerprint, principal: str):
+        if self.asset_store is None:
+            return None
+        artifact = self.asset_store.get_published(principal, desired)
+        if artifact is None:
+            return None
+        if artifact.validation_state is PreparedEnvironmentValidationState.INVALIDATED:
+            return None
+        descriptor = EnvironmentDescriptor(
+            environment_id=artifact.artifact_id,
+            artifact_type=artifact.artifact_type,
+            fingerprint=artifact.fingerprint,
+            registration_mode=EnvironmentRegistrationMode.STATIC_REGISTRY,
+            prefix_sensitive=True,
+            probe_required=True,
+            metadata={
+                "python_program": "/sandbox-env/venv/bin/python",
+                "mount_target": artifact.mount_target or "/sandbox-env",
+                "prepared": True,
+            },
+        )
+        if not self._probe_or_invalidate(descriptor, artifact_id=artifact.artifact_id):
+            return None
+        return SandboxEnvironmentPlan(
+            strategy=EnvironmentReuseStrategy.REUSED_READ_ONLY_ENV,
+            base_image_digest=self.base_image_digest,
+            reused_environment_id=artifact.artifact_id,
+            environment_fingerprint=artifact.fingerprint,
+            reused_mount_target=artifact.mount_target or "/sandbox-env",
+            compatibility=CompatibilityResult(
+                status=CompatibilityStatus.COMPATIBLE,
+                reasons=("prepared immutable environment probe passed",),
+            ),
+            provenance={
+                "reason": "prepared environment artifact cache hit",
+                "reuse_layer": "prepared_environment",
+                "owner_principal": principal,
+                "artifact_id": artifact.artifact_id,
+            },
+        )
+
+    def _probe_or_invalidate(self, descriptor: EnvironmentDescriptor, *, artifact_id: str | None = None) -> bool:
+        if self.probe is None:
+            return True
+        try:
+            ok = bool(self.probe(descriptor))
+        except Exception:
+            ok = False
+        if ok:
+            return True
+        if artifact_id is not None and self.asset_store is not None:
+            self.asset_store.invalidate(artifact_id)
+        return False
+
+    def _matching_package_cache_ids(
+        self, principal: str, fingerprint: EnvironmentFingerprint,
+    ) -> tuple[str, ...]:
+        matched = []
+        seen = set()
+        if self.asset_store is not None:
+            for source in self.asset_store.package_caches(principal, fingerprint):
+                if source.cache_id not in seen:
+                    matched.append(source.cache_id)
+                    seen.add(source.cache_id)
+        for source in self.package_caches:
+            if source.fingerprint != fingerprint.content_digest:
+                continue
+            if source.owner_principal not in {None, principal}:
+                continue
+            if source.cache_id not in seen:
+                matched.append(source.cache_id)
+                seen.add(source.cache_id)
+        return tuple(matched)
 
     def compatibility(
         self,
@@ -415,6 +585,8 @@ class EnvironmentBroker:
             for item in requirement.frameworks
         }
         python_version = requirement.python_constraint or ">=3.11"
+        spec_hash = dependency_specification_digest(requirement)
+        command_hash = install_command_digest(requirement.install_commands)
         return environment_fingerprint(
             platform_name=self.platform_name,
             architecture=self.architecture,
@@ -423,15 +595,35 @@ class EnvironmentBroker:
             frameworks=frameworks,
             system_packages={item.casefold(): "required" for item in requirement.system_dependencies},
             cuda_runtime=requirement.cuda_hints[0] if requirement.cuda_hints else None,
+            abi={"package_manager": "pip"},
+            base_image_digest=self.base_image_digest,
+            dependency_specification_hash=spec_hash,
+            install_command_hash=command_hash,
         )
 
     @staticmethod
-    def _plan(strategy, fingerprint, image, environment_id, status, reason):
+    def _plan(
+        strategy,
+        fingerprint,
+        image,
+        environment_id,
+        status,
+        reason,
+        *,
+        reuse_layer,
+        principal,
+        mount_target=None,
+    ):
         return SandboxEnvironmentPlan(
             strategy=strategy,
             base_image_digest=image,
             reused_environment_id=environment_id,
             environment_fingerprint=fingerprint,
+            reused_mount_target=mount_target,
             compatibility=CompatibilityResult(status=status, reasons=(reason,)),
-            provenance={"reason": reason},
+            provenance={
+                "reason": reason,
+                "reuse_layer": reuse_layer,
+                "owner_principal": principal,
+            },
         )

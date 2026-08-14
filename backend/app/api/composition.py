@@ -66,6 +66,7 @@ class ExistingServicesAnalysisPipeline:
         )
         return IntakeAnalysis(
             paper=paper, paper_catalog=paper_result.catalog,
+            paper_document=document,
             repository_catalog=repository_result.catalog,
             alignment_catalog=alignment_result.catalog,
             goal_resolution=goal_result,
@@ -74,15 +75,29 @@ class ExistingServicesAnalysisPipeline:
 
     def clarify(self, *, intake, answers):
         enriched = intake.user_goal + "\nUser clarification:\n" + "\n".join(answers)
-        return self.goal_intake.intake(
-            UserReproductionGoal(goal_id=f"goal:{intake.intake_id}", text=enriched),
-            intake.paper_catalog,
+        return self.resolve_goal(
+            catalog=intake.paper_catalog,
+            goal=UserReproductionGoal(goal_id=f"goal:{intake.intake_id}", text=enriched),
         )
 
-    def plan(self, *, intake):
+    def resolve_goal(self, *, catalog, goal):
+        return self.goal_intake.intake(goal, catalog)
+
+    def resolve_experiment_ids(self, *, catalog, goal, experiment_ids):
+        resolver = getattr(self.goal_intake, "resolver", None)
+        if resolver is None or not hasattr(resolver, "resolve_from_ids"):
+            from backend.app.agents.paper.goals import ReproductionGoalResolver
+            resolver = ReproductionGoalResolver()
+        return resolver.resolve_from_ids(catalog, goal, tuple(experiment_ids))
+
+    def plan(self, *, intake=None, specification=None, paper_catalog=None, repository_catalog=None, alignment_catalog=None):
+        if intake is not None:
+            specification = intake.goal_resolution.specification
+            paper_catalog = intake.paper_catalog
+            repository_catalog = intake.repository_catalog
+            alignment_catalog = intake.alignment_catalog
         return self.planner.plan(
-            intake.goal_resolution.specification, intake.paper_catalog,
-            intake.repository_catalog, intake.alignment_catalog,
+            specification, paper_catalog, repository_catalog, alignment_catalog,
         ).plan
 
 

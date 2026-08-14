@@ -20,6 +20,14 @@ class EnvironmentArtifactType(str, Enum):
     CONDA_ARCHIVE = "conda_archive"
     READ_ONLY_PREFIX = "read_only_prefix"
     PACKAGE_CACHE_SOURCE = "package_cache_source"
+    PREPARED_ENVIRONMENT = "prepared_environment"
+
+
+class PreparedEnvironmentValidationState(str, Enum):
+    PENDING = "pending"
+    PASSED = "passed"
+    FAILED = "failed"
+    INVALIDATED = "invalidated"
 
 
 class EnvironmentReuseStrategy(str, Enum):
@@ -82,6 +90,9 @@ class EnvironmentFingerprint(DomainModel):
     system_packages: dict[NonEmptyStr, NonEmptyStr] = Field(default_factory=dict)
     cuda_runtime: NonEmptyStr | None = None
     abi: dict[NonEmptyStr, NonEmptyStr] = Field(default_factory=dict)
+    base_image_digest: NonEmptyStr | None = None
+    dependency_specification_hash: NonEmptyStr | None = None
+    install_command_hash: NonEmptyStr | None = None
     content_digest: NonEmptyStr
 
 
@@ -111,6 +122,14 @@ class ReusableEnvironmentArtifact(DomainModel):
     fingerprint: EnvironmentFingerprint
     image_digest: NonEmptyStr | None = None
     resource_id: NonEmptyStr | None = None
+    python_version: NonEmptyStr | None = None
+    base_image_digest: NonEmptyStr | None = None
+    dependency_specification_hash: NonEmptyStr | None = None
+    cuda_runtime: NonEmptyStr | None = None
+    created_at: datetime | None = None
+    owner_principal: NonEmptyStr | None = None
+    validation_state: PreparedEnvironmentValidationState | None = None
+    mount_target: NonEmptyStr | None = None
 
     @model_validator(mode="after")
     def immutable_reference(self):
@@ -119,6 +138,8 @@ class ReusableEnvironmentArtifact(DomainModel):
                 raise ValueError("reusable OCI artifact requires an image digest")
         elif self.resource_id is None:
             raise ValueError("non-image reusable artifact requires a registry ID")
+        if self.created_at is not None:
+            _require_aware(self.created_at, "created_at")
         return self
 
 
@@ -126,6 +147,7 @@ class PackageCacheSource(DomainModel):
     cache_id: NonEmptyStr
     package_manager: NonEmptyStr
     fingerprint: NonEmptyStr
+    owner_principal: NonEmptyStr | None = None
 
 
 class CompatibilityResult(DomainModel):
@@ -146,6 +168,7 @@ class SandboxEnvironmentPlan(DomainModel):
     compatibility: CompatibilityResult
     warnings: tuple[NonEmptyStr, ...] = ()
     provenance: dict[NonEmptyStr, JsonValue] = Field(default_factory=dict)
+    reused_mount_target: NonEmptyStr | None = None
 
 
 class AssignedDeviceSet(DomainModel):

@@ -6,6 +6,7 @@ from threading import RLock
 
 from .models import (
     AssignedDeviceSet,
+    EnvironmentReuseStrategy,
     MountCategory,
     RegisteredResource,
     ResourceKind,
@@ -62,6 +63,7 @@ class SandboxRuntimeService:
         gpu_lease_provider=None,
         external_resource_binding_provider=None,
         repository_snapshot_provider=None,
+        artifact_promoter=None,
     ) -> None:
         self.manager = manager
         self.environment_broker = environment_broker
@@ -72,6 +74,7 @@ class SandboxRuntimeService:
         self.gpu_lease_provider = gpu_lease_provider
         self.external_resource_binding_provider = external_resource_binding_provider
         self.repository_snapshot_provider = repository_snapshot_provider
+        self.artifact_promoter = artifact_promoter
 
     def prepare(self, context):
         if not context.repository_snapshot_id:
@@ -93,8 +96,17 @@ class SandboxRuntimeService:
                 },
             )
         )
-        plan = self.environment_broker.resolve(context.environment_requirement)
-        mounts = list(self._private_mounts(context.run_id))
+        plan = self.environment_broker.resolve(
+            context.environment_requirement,
+            principal=getattr(context, "owner_principal", "system:anonymous"),
+            run_id=context.run_id,
+        )
+        principal = getattr(context, "owner_principal", "system:anonymous")
+        include_private_env = not (
+            plan.strategy is EnvironmentReuseStrategy.REUSED_READ_ONLY_ENV
+            and (plan.reused_mount_target or "/opt/reused-env") == "/sandbox-env"
+        )
+        mounts = list(self._private_mounts(context.run_id, include_environment=include_private_env))
         mounts.append(
             SandboxMount(
                 resource_id=f"repository:{context.repository_snapshot_id}",
@@ -116,7 +128,7 @@ class SandboxRuntimeService:
             mounts.append(
                 SandboxMount(
                     resource_id=f"environment:{plan.reused_environment_id}",
-                    target="/opt/reused-env",
+                    target=plan.reused_mount_target or "/opt/reused-env",
                     category=MountCategory.REGISTERED_ENV_READ_ONLY,
                     read_only=True,
                 )
@@ -143,9 +155,28 @@ class SandboxRuntimeService:
             self.manager.start(provisioning)
             try:
                 self.provisioner.provision(provisioning, plan)
+                if (
+                    self.artifact_promoter is not None
+                    and plan.strategy
+                    in {
+                        EnvironmentReuseStrategy.BUILT_IN_SANDBOX,
+                        EnvironmentReuseStrategy.SEEDED_FROM_PACKAGE_CACHE,
+                    }
+                ):
+                    try:
+                        self.artifact_promoter.promote(
+                            provisioning, plan, principal=principal,
+                        )
+                    except Exception:
+                        pass
+                self.environment_broker.complete_build(plan, principal=principal)
                 self.manager.stop(provisioning)
                 self.manager.release_container(provisioning)
             except Exception:
+                try:
+                    self.environment_broker.abort_build(plan, principal=principal)
+                except Exception:
+                    pass
                 try:
                     self.manager.kill(provisioning)
                 except Exception:
@@ -153,6 +184,8 @@ class SandboxRuntimeService:
                 self.manager.cleanup(context.run_id)
                 self.resource_registry.remove_run_resources(context.run_id)
                 raise
+        elif plan.provenance.get("build_claimed"):
+            self.environment_broker.complete_build(plan, principal=principal)
 
         # Copy the immutable source through a short-lived offline container.
         # The final execution/OpenHands container must not retain visibility of
@@ -224,13 +257,14 @@ class SandboxRuntimeService:
         finally:
             self.resource_registry.remove_run_resources(run_id)
 
-    def _private_mounts(self, run_id: str):
-        definitions = (
+    def _private_mounts(self, run_id: str, *, include_environment: bool = True):
+        definitions = [
             ("workspace", "/workspace"),
-            ("environment", "/sandbox-env"),
             ("cache", "/cache"),
             ("output", "/output"),
-        )
+        ]
+        if include_environment:
+            definitions.insert(1, ("environment", "/sandbox-env"))
         mounts = []
         try:
             for purpose, target in definitions:

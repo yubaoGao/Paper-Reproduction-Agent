@@ -13,6 +13,13 @@ from .reproduction import PaperReference
 NonNegativeFloat = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
 
+def _duplicate_ids(values: tuple[str, ...]) -> tuple[str, ...]:
+    counts: dict[str, int] = {}
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+    return tuple(value for value, count in counts.items() if count > 1)
+
+
 class ContentBlockType(str, Enum):
     TEXT = "text"
     HEADING = "heading"
@@ -174,9 +181,18 @@ class PaperDocument(DomainModel):
             raise ValueError("block ids must be document-unique")
         table_ids = {table.table_id for table in self.tables}
         figure_ids = {figure.figure_id for figure in self.figures}
-        section_ids = {section.section_id for section in self.sections}
-        if len(table_ids) != len(self.tables) or len(figure_ids) != len(self.figures) or len(section_ids) != len(self.sections):
-            raise ValueError("section, table, and figure ids must be unique")
+        duplicate_sections = _duplicate_ids(tuple(section.section_id for section in self.sections))
+        duplicate_tables = _duplicate_ids(tuple(table.table_id for table in self.tables))
+        duplicate_figures = _duplicate_ids(tuple(figure.figure_id for figure in self.figures))
+        if duplicate_sections or duplicate_tables or duplicate_figures:
+            parts = []
+            if duplicate_sections:
+                parts.append(f"duplicate section ids: {list(duplicate_sections)}")
+            if duplicate_tables:
+                parts.append(f"duplicate table ids: {list(duplicate_tables)}")
+            if duplicate_figures:
+                parts.append(f"duplicate figure ids: {list(duplicate_figures)}")
+            raise ValueError("; ".join(parts))
         if any(table.end_page > self.page_count for table in self.tables):
             raise ValueError("table page range exceeds the document")
         if any(figure.page_number > self.page_count for figure in self.figures):

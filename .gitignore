@@ -15,6 +15,9 @@ venv/
 .vscode/
 .DS_Store
 
+# Test / fake-sandbox leftovers
+vol-*/
+
 # Runtime artifacts and local credentials
 logs/
 workspace/

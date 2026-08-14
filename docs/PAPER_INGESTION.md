@@ -22,11 +22,11 @@ PaperReference + optional upload stream
 
 `PaperDocument` 包含稳定的 `document_id`、`PaperReference`、源、SHA-256、页数、页面、章节、表格、图片和解析元数据。页面同时保留全文和按 reading order 排列的 `ContentBlock`。block 类型统一为 text、heading、table、figure、list、equation 和 other；不为每种类型扩展解析器专属 class。
 
-稳定 locator 使用可读的一基序号，而不是 Docling 的随机内部引用：
+稳定 locator 使用可读的一基序号，而不是 Docling 的随机内部引用。`section` identity 是 heading 的文档级 reading-order，论文原编号只保留在 title/text 中：
 
 - `page:5`
 - `page:5/block:p5-b12`
-- `section:4.2`
+- `section:3`
 - `table:2/row:DMSF/column:Accuracy`
 - `figure:3`
 

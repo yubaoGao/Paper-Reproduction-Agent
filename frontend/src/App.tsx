@@ -4,17 +4,22 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Avatar, Input, Tooltip } from "antd";
 import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { ApiError, api, getPrincipal, setPrincipal } from "./api/client";
-import type { Intake, JobDetail } from "./api/types";
+import type { Intake, JobDetail, ReproductionSession } from "./api/types";
 import { ConversationWorkspace } from "./components/ConversationWorkspace";
 import { Inspector } from "./components/Inspector";
 import { TaskHistory } from "./components/TaskHistory";
 import { useReproductionEvents } from "./hooks/useReproductionEvents";
 import { humanize } from "./utils/presentation";
 
-function routeSelection(pathname: string): { intakeId?: string; jobId?: string } {
+function routeSelection(pathname: string): { intakeId?: string; jobId?: string; sessionId?: string } {
+  const session = matchPath("/sessions/:sessionId", pathname);
   const intake = matchPath("/intakes/:intakeId", pathname);
   const job = matchPath("/reproductions/:jobId", pathname);
-  return { intakeId: intake?.params.intakeId, jobId: job?.params.jobId };
+  return {
+    sessionId: session?.params.sessionId,
+    intakeId: intake?.params.intakeId,
+    jobId: job?.params.jobId,
+  };
 }
 
 function errorMessage(error: unknown): string | undefined {
@@ -55,6 +60,19 @@ export default function App() {
     enabled: Boolean(selection.jobId),
     refetchInterval: (query) => ["queued", "claimed", "running", "cancel_requested"].includes(query.state.data?.state ?? "") ? 4_000 : false,
   });
+  const derivedSessionId = selection.sessionId ?? routeJobQuery.data?.session_id ?? intakeQuery.data?.session_id ?? undefined;
+  const sessionQuery = useQuery({
+    queryKey: ["session", derivedSessionId],
+    queryFn: () => api.getSession(derivedSessionId!),
+    enabled: Boolean(derivedSessionId),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return false;
+      if (["awaiting_clarification", "waiting_for_resource"].includes(data.status)) return 2_500;
+      if (data.jobs.some((item) => ["queued", "claimed", "running", "cancel_requested"].includes(item.state))) return 4_000;
+      return 8_000;
+    },
+  });
   const intakeJobId = intakeQuery.data?.job_id ?? undefined;
   const intakeJobQuery = useQuery({
     queryKey: ["job", intakeJobId],
@@ -62,7 +80,9 @@ export default function App() {
     enabled: Boolean(intakeJobId && !selection.jobId),
     refetchInterval: (query) => ["queued", "claimed", "running", "cancel_requested"].includes(query.state.data?.state ?? "") ? 4_000 : false,
   });
-  const job = activeJob(routeJobQuery.data, intakeJobQuery.data);
+  const sessionJobs = sessionQuery.data?.jobs ?? [];
+  const activeSessionJob = [...sessionJobs].reverse().find((item) => ["queued", "claimed", "running", "cancel_requested"].includes(item.state)) ?? sessionJobs.at(-1);
+  const job = activeJob(routeJobQuery.data, intakeJobQuery.data) ?? activeSessionJob;
   const streamJobId = job?.job_id;
   const stream = useReproductionEvents(streamJobId);
   const hasCanonicalResult = job?.state === "succeeded";
@@ -82,37 +102,67 @@ export default function App() {
   const refreshIntake = (intake: Intake) => {
     queryClient.setQueryData(["intake", intake.intake_id], intake);
     void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    if (intake.session_id) void queryClient.invalidateQueries({ queryKey: ["session", intake.session_id] });
+  };
+  const refreshSession = (session: ReproductionSession) => {
+    queryClient.setQueryData(["session", session.session_id], session);
+    void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+  };
+  const applyClarifyOrResourceResult = (result: Intake | ReproductionSession) => {
+    if ("origin_intake_id" in result) refreshSession(result);
+    else refreshIntake(result);
   };
   const createMutation = useMutation({
     mutationFn: api.createIntake,
     onMutate: () => setActionError(undefined),
     onSuccess: (intake) => {
       refreshIntake(intake);
-      navigate(`/intakes/${encodeURIComponent(intake.intake_id)}`);
+      if (intake.session_id) navigate(`/sessions/${encodeURIComponent(intake.session_id)}`);
+      else navigate(`/intakes/${encodeURIComponent(intake.intake_id)}`);
     },
     onError: (error) => setActionError(errorMessage(error)),
   });
-  const clarifyMutation = useMutation({
-    mutationFn: (answers: string[]) => api.clarify(selection.intakeId!, answers),
+  const sessionId = selection.sessionId ?? sessionQuery.data?.session_id ?? intakeQuery.data?.session_id ?? undefined;
+  const clarifyMutation = useMutation<Intake | ReproductionSession, Error, string[]>({
+    mutationFn: (answers) => sessionId
+      ? api.clarifySession(sessionId, answers)
+      : api.clarify(selection.intakeId!, answers),
     onMutate: () => setActionError(undefined),
-    onSuccess: refreshIntake,
+    onSuccess: applyClarifyOrResourceResult,
     onError: (error) => setActionError(errorMessage(error)),
   });
-  const resourceMutation = useMutation({
-    mutationFn: ({ requirementId, hostPath }: { requirementId: string; hostPath: string }) =>
-      api.submitResource(selection.intakeId!, requirementId, hostPath),
+  const resourceMutation = useMutation<
+    Intake | ReproductionSession,
+    Error,
+    { requirementId: string; hostPath: string }
+  >({
+    mutationFn: ({ requirementId, hostPath }) =>
+      sessionId
+        ? api.submitSessionResource(sessionId, requirementId, hostPath)
+        : api.submitResource(selection.intakeId!, requirementId, hostPath),
     onMutate: () => setActionError(undefined),
-    onSuccess: refreshIntake,
+    onSuccess: applyClarifyOrResourceResult,
     onError: (error) => setActionError(errorMessage(error)),
   });
   const startMutation = useMutation({
-    mutationFn: () => api.start(selection.intakeId!),
+    mutationFn: () => sessionId ? api.startSession(sessionId) : api.start(selection.intakeId!),
     onMutate: () => setActionError(undefined),
     onSuccess: (startedJob) => {
       queryClient.setQueryData(["job", startedJob.job_id], startedJob);
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      navigate(`/reproductions/${encodeURIComponent(startedJob.job_id)}`);
+      if (startedJob.session_id) {
+        void queryClient.invalidateQueries({ queryKey: ["session", startedJob.session_id] });
+        navigate(`/sessions/${encodeURIComponent(startedJob.session_id)}`);
+      } else {
+        navigate(`/reproductions/${encodeURIComponent(startedJob.job_id)}`);
+      }
     },
+    onError: (error) => setActionError(errorMessage(error)),
+  });
+  const appendMutation = useMutation({
+    mutationFn: (input: { goal?: string; experiment_ids?: string[] }) => api.appendExperiments(sessionId!, input),
+    onMutate: () => setActionError(undefined),
+    onSuccess: refreshSession,
     onError: (error) => setActionError(errorMessage(error)),
   });
   const cancelMutation = useMutation({
@@ -121,13 +171,14 @@ export default function App() {
     onSuccess: (cancelledJob) => {
       queryClient.setQueryData(["job", cancelledJob.job_id], cancelledJob);
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      if (cancelledJob.session_id) void queryClient.invalidateQueries({ queryKey: ["session", cancelledJob.session_id] });
     },
     onError: (error) => setActionError(errorMessage(error)),
   });
 
-  const routeError = intakeQuery.error ?? routeJobQuery.error ?? intakeJobQuery.error;
+  const routeError = intakeQuery.error ?? routeJobQuery.error ?? intakeJobQuery.error ?? sessionQuery.error;
   const currentError = actionError ?? errorMessage(routeError);
-  const actionLoading = clarifyMutation.isPending || resourceMutation.isPending || startMutation.isPending || cancelMutation.isPending;
+  const actionLoading = clarifyMutation.isPending || resourceMutation.isPending || startMutation.isPending || cancelMutation.isPending || appendMutation.isPending;
   const gpuSummary = job?.waiting_reason
     ? "等待分配"
     : job?.gpu_allocation
@@ -172,18 +223,22 @@ export default function App() {
       <div className="workspace-grid">
         <TaskHistory
           jobs={jobsQuery.data ?? []}
+          sessions={sessionQuery.data ? [sessionQuery.data] : []}
           activeJobId={job?.job_id}
           activeIntake={intakeQuery.data}
+          activeSessionId={sessionQuery.data?.session_id}
           loading={jobsQuery.isLoading}
           onNew={() => { setActionError(undefined); navigate("/"); }}
           onSelectJob={(jobId) => { setActionError(undefined); navigate(`/reproductions/${encodeURIComponent(jobId)}`); }}
           onSelectIntake={(intakeId) => { setActionError(undefined); navigate(`/intakes/${encodeURIComponent(intakeId)}`); }}
+          onSelectSession={(id) => { setActionError(undefined); navigate(`/sessions/${encodeURIComponent(id)}`); }}
         />
         <ConversationWorkspace
           intake={intakeQuery.data}
+          session={sessionQuery.data}
           job={job}
           events={stream.events}
-          loading={intakeQuery.isLoading || routeJobQuery.isLoading || intakeJobQuery.isLoading}
+          loading={intakeQuery.isLoading || routeJobQuery.isLoading || intakeJobQuery.isLoading || sessionQuery.isLoading}
           creating={createMutation.isPending}
           actionLoading={actionLoading}
           error={currentError}
@@ -193,9 +248,12 @@ export default function App() {
           onResource={(requirementId, hostPath) => resourceMutation.mutate({ requirementId, hostPath })}
           onStart={() => startMutation.mutate()}
           onCancel={() => cancelMutation.mutate()}
+          onAppendGoal={(goal) => appendMutation.mutate({ goal })}
+          onRunExperiment={(experimentId) => appendMutation.mutate({ experiment_ids: [experimentId] })}
         />
         <Inspector
           intake={intakeQuery.data}
+          session={sessionQuery.data}
           job={job}
           events={stream.events}
           results={resultsQuery.data}

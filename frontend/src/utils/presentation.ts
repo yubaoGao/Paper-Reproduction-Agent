@@ -4,8 +4,11 @@ const labels: Record<string, string> = {
   analyzing: "分析中",
   ambiguous: "待确认",
   waiting_for_resource: "等待资源",
+  awaiting_clarification: "待确认",
   ready_to_run: "可运行",
   terminal: "已结束",
+  active: "进行中",
+  not_selected: "未选择",
   pending: "待处理",
   planning: "规划中",
   ready: "已就绪",
@@ -67,9 +70,9 @@ export function isTerminal(status?: string): boolean {
 }
 
 export function statusTone(status?: string): "success" | "processing" | "warning" | "error" | "default" {
-  if (["succeeded", "ready", "ready_to_run", "available", "completed"].includes(status ?? "")) return "success";
+  if (["succeeded", "ready", "ready_to_run", "available", "completed", "active"].includes(status ?? "")) return "success";
   if (["running", "queued", "claimed", "analyzing", "planning"].includes(status ?? "")) return "processing";
-  if (["waiting_for_resource", "cancel_requested", "missing", "unavailable"].includes(status ?? "")) return "warning";
+  if (["waiting_for_resource", "awaiting_clarification", "ambiguous", "cancel_requested", "missing", "unavailable", "not_selected"].includes(status ?? "")) return "warning";
   if (["failed", "cancelled", "invalid"].includes(status ?? "")) return "error";
   return "default";
 }

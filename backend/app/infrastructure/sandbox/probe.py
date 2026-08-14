@@ -50,7 +50,7 @@ class SandboxEnvironmentProbe:
         mounts.append(
             SandboxMount(
                 resource_id=f"environment:{descriptor.environment_id}",
-                target="/opt/reused-env",
+                target=str(descriptor.metadata.get("mount_target") or "/opt/reused-env"),
                 category=MountCategory.REGISTERED_ENV_READ_ONLY,
                 read_only=True,
             )
@@ -82,7 +82,9 @@ class SandboxEnvironmentProbe:
         try:
             result = self.manager.exec(
                 handle,
-                program="/opt/reused-env/bin/python",
+                program=str(
+                    descriptor.metadata.get("python_program") or "/opt/reused-env/bin/python"
+                ),
                 argv=("-I", "-c", script),
                 cwd="/workspace",
                 timeout_seconds=120,

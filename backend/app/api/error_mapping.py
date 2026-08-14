@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from backend.app.services import (
     APIUseCaseError, EntityNotFoundError, InvalidJobQueueTransition,
+    InvalidSessionStateError,
     PaperCodeAlignmentError, PaperIngestionError, RepositoryAnalysisError,
     ReproductionIntakeError, ReproductionPlanningError,
     ResourceAccessDeniedError, ResourcePathValidationError, ResourceRegistryError,
@@ -47,5 +48,5 @@ def install_error_handlers(app: FastAPI) -> None:
     async def conflict(_request: Request, exc: Exception):
         return JSONResponse(status_code=409, content={"code": getattr(exc, "code", "conflict"), "message": str(exc)})
 
-    for exception_type in (APIUseCaseError, InvalidJobQueueTransition, ResourceRegistryError):
+    for exception_type in (APIUseCaseError, InvalidJobQueueTransition, InvalidSessionStateError, ResourceRegistryError):
         app.add_exception_handler(exception_type, conflict)

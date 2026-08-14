@@ -4,6 +4,7 @@ import type {
   FinalResult,
   Intake,
   JobDetail,
+  ReproductionSession,
 } from "./types";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
@@ -81,4 +82,23 @@ export const api = {
     request<JobDetail>(`/api/v1/reproductions/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
   getResults: (jobId: string) => request<FinalResult[]>(`/api/v1/reproductions/${encodeURIComponent(jobId)}/results`),
   getComparison: (jobId: string) => request<ComparisonReport>(`/api/v1/reproductions/${encodeURIComponent(jobId)}/comparison`),
+  getSession: (sessionId: string) =>
+    request<ReproductionSession>(`/api/v1/reproductions/sessions/${encodeURIComponent(sessionId)}`),
+  appendExperiments: (sessionId: string, body: { goal?: string; experiment_ids?: string[] }) =>
+    request<ReproductionSession>(`/api/v1/reproductions/sessions/${encodeURIComponent(sessionId)}/experiments`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  clarifySession: (sessionId: string, answers: string[]) =>
+    request<ReproductionSession>(`/api/v1/reproductions/sessions/${encodeURIComponent(sessionId)}/clarifications`, {
+      method: "POST",
+      body: JSON.stringify({ answers }),
+    }),
+  submitSessionResource: (sessionId: string, requirementId: string, hostPath: string) =>
+    request<ReproductionSession>(`/api/v1/reproductions/sessions/${encodeURIComponent(sessionId)}/resources`, {
+      method: "POST",
+      body: JSON.stringify({ requirement_id: requirementId, host_path: hostPath }),
+    }),
+  startSession: (sessionId: string) =>
+    request<JobDetail>(`/api/v1/reproductions/sessions/${encodeURIComponent(sessionId)}/start`, { method: "POST" }),
 };

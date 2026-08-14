@@ -279,7 +279,7 @@ class DatasetRequirement(DomainModel):
         if self.availability is DatasetAvailability.AVAILABLE and self.binding is None:raise ValueError("available dataset requires a binding")
         return self
 class EnvironmentRequirement(DomainModel):
-    python_constraint:NonEmptyStr|None=None;dependencies:tuple[NonEmptyStr,...]=();system_dependencies:tuple[NonEmptyStr,...]=();frameworks:tuple[NonEmptyStr,...]=();cuda_hints:tuple[NonEmptyStr,...]=();manifest_references:tuple[NonEmptyStr,...]=()
+    python_constraint:NonEmptyStr|None=None;dependencies:tuple[NonEmptyStr,...]=();system_dependencies:tuple[NonEmptyStr,...]=();frameworks:tuple[NonEmptyStr,...]=();cuda_hints:tuple[NonEmptyStr,...]=();manifest_references:tuple[NonEmptyStr,...]=();install_commands:tuple[NonEmptyStr,...]=()
 class ResourceRequirement(DomainModel):
     gpu_required:bool|None=None;gpu_count:int|None=Field(default=None,ge=0);cpu_cores:float|None=Field(default=None,gt=0);memory_mb:int|None=Field(default=None,ge=128);notes:tuple[NonEmptyStr,...]=()
 

@@ -9,14 +9,16 @@ from typing import Protocol
 
 from backend.app.domain import (
     AuthoritativePlanningSnapshot, GoalResolutionResult, GoalResolutionStatus,
-    PaperCodeAlignmentCatalog, PaperExperimentCatalog, PaperReference,
+    PaperCodeAlignmentCatalog, PaperDocument, PaperExperimentCatalog, PaperReference,
     PlanStatus, RepositoryAnalysisCatalog, ReproductionEventType,
     ReproductionExecutionPlan, ReproductionIntake, ReproductionIntakeState,
-    ReproductionJob, ReproductionJobStatus, RepositorySnapshot, UserReproductionGoal,
+    ReproductionJob, ReproductionJobStatus, ReproductionSession,
+    ReproductionSessionStatus, RepositorySnapshot, UserReproductionGoal,
     ResultValidationStatus,
 )
 from backend.app.services.external_resources import ExternalResourceResolutionService
 from backend.app.services.persistence import PersistenceEntityNotFoundError
+from backend.app.services.session_projection import completed_experiment_ids, project_session_experiments
 
 
 class APIUseCaseError(RuntimeError):
@@ -31,8 +33,29 @@ class InvalidIntakeStateError(APIUseCaseError):
     code = "invalid_intake_state"
 
 
+class InvalidSessionStateError(APIUseCaseError):
+    code = "invalid_session_state"
+
+
 class PlanningBlockedError(APIUseCaseError):
     code = "planning_blocked"
+
+
+_REMAINING_PHRASES = (
+    "remaining",
+    "the rest",
+    "rest of",
+    "not yet",
+    "remaining experiments",
+    "剩余",
+    "剩下",
+    "其余",
+    "还未",
+    "尚未",
+    "未完成",
+    "还没复现",
+    "尚未复现",
+)
 
 
 @dataclass(frozen=True)
@@ -43,6 +66,7 @@ class IntakeAnalysis:
     alignment_catalog: PaperCodeAlignmentCatalog
     goal_resolution: GoalResolutionResult
     repository_snapshot: RepositorySnapshot | None = None
+    paper_document: PaperDocument | None = None
 
 
 class ReproductionAnalysisPipeline(Protocol):
@@ -57,7 +81,12 @@ class ReproductionAnalysisPipeline(Protocol):
         self, *, intake: ReproductionIntake, answers: tuple[str, ...],
     ) -> GoalResolutionResult: ...
 
-    def plan(self, *, intake: ReproductionIntake) -> ReproductionExecutionPlan: ...
+    def plan(self, *, intake: ReproductionIntake | None = None, specification=None,
+             paper_catalog=None, repository_catalog=None, alignment_catalog=None) -> ReproductionExecutionPlan: ...
+
+    def resolve_goal(self, *, catalog, goal) -> GoalResolutionResult: ...
+
+    def resolve_experiment_ids(self, *, catalog, goal, experiment_ids) -> GoalResolutionResult: ...
 
 
 class ReproductionAPIService:
@@ -87,13 +116,17 @@ class ReproductionAPIService:
             if registry is None:
                 raise APIUseCaseError("production persistence omitted the repository snapshot registry")
             registry.register(analysis.repository_snapshot)
+        session = self._create_session(intake, analysis)
         intake = intake.model_copy(update={
+            "session_id": session.session_id,
             "paper": analysis.paper, "paper_catalog": analysis.paper_catalog,
             "repository_catalog": analysis.repository_catalog,
             "alignment_catalog": analysis.alignment_catalog,
             "goal_resolution": analysis.goal_resolution, "updated_at": datetime.now(timezone.utc),
         })
-        return self._continue_after_goal(intake)
+        if hasattr(self.persistence.events, "bind_session"):
+            self.persistence.events.bind_session(intake.intake_id, session.session_id)
+        return self._continue_after_goal(intake, session=session)
 
     def clarify(self, intake_id: str, *, principal: str, answers: tuple[str, ...]):
         intake = self._owned_intake(intake_id, principal)
@@ -113,7 +146,7 @@ class ReproductionAPIService:
             "waiting_reason": None,
             "updated_at": datetime.now(timezone.utc),
         })
-        return self._continue_after_goal(intake)
+        return self._continue_after_goal(intake, session=self._session_for_intake(intake))
 
     def submit_resource(self, intake_id: str, *, principal: str, requirement_id: str, host_path: str):
         intake = self._owned_intake(intake_id, principal)
@@ -134,22 +167,16 @@ class ReproductionAPIService:
                 "waiting_reason": "required external resources are not available",
             })
             self.persistence.intakes.update(intake)
+            self._sync_session_from_intake(intake)
             return intake
         self._event(intake, ReproductionEventType.RESOURCE_RESOLVED, {"requirement_id": requirement_id})
-        return self._plan_and_prepare_job(intake)
+        return self._plan_and_prepare_job(intake, session=self._session_for_intake(intake))
 
     def start(self, intake_id: str, *, principal: str):
         intake = self._owned_intake(intake_id, principal)
         if intake.state is not ReproductionIntakeState.READY_TO_RUN or intake.job_id is None:
             raise InvalidIntakeStateError("intake is not ready to run")
-        job = self.persistence.queue.enqueue(intake.job_id)
-        intake = intake.model_copy(update={
-            "state": ReproductionIntakeState.QUEUED,
-            "updated_at": datetime.now(timezone.utc),
-        })
-        self.persistence.intakes.update(intake)
-        self._event(intake, ReproductionEventType.JOB_QUEUED, {"status": job.status.value}, job_id=job.job_id)
-        return job
+        return self._enqueue_job(intake.job_id, intake=intake, session=self._session_for_intake(intake))
 
     def get_intake(self, intake_id: str, *, principal: str):
         intake = self._owned_intake(intake_id, principal)
@@ -218,7 +245,123 @@ class ReproductionAPIService:
         self.get_job(job_id, principal=principal)
         return self.persistence.events.list_by_job(job_id, after_sequence=after_sequence)
 
-    def _continue_after_goal(self, intake: ReproductionIntake):
+    def get_session(self, session_id: str, *, principal: str):
+        session = self._owned_session(session_id, principal)
+        jobs = self._jobs_for_session(session.session_id)
+        events = ()
+        if hasattr(self.persistence.events, "list_by_session"):
+            events = self.persistence.events.list_by_session(session.session_id)
+        return session, jobs, project_session_experiments(session.paper_catalog, jobs), events
+
+    def list_sessions(self, *, principal: str):
+        if not hasattr(self.persistence, "sessions"):
+            return ()
+        return self.persistence.sessions.list_by_owner(principal)
+
+    def append_experiments(
+        self, session_id: str, *, principal: str,
+        goal: str | None = None, experiment_ids: tuple[str, ...] | None = None,
+    ):
+        session = self._owned_session(session_id, principal)
+        if not goal and not experiment_ids:
+            raise InvalidSessionStateError("append requires a goal or explicit experiment ids")
+        if session.pending_job_id is not None:
+            pending = self.persistence.jobs.get(session.pending_job_id)
+            if pending.status is ReproductionJobStatus.READY and self._same_append_request(pending, goal, experiment_ids):
+                return session, pending
+        goal_text = goal or f"Reproduce {', '.join(experiment_ids or ())}"
+        if experiment_ids:
+            resolution = self.pipeline.resolve_experiment_ids(
+                catalog=session.paper_catalog,
+                goal=UserReproductionGoal(goal_id=f"goal:{session.session_id}:{uuid.uuid4().hex[:10]}", text=goal_text),
+                experiment_ids=experiment_ids,
+            )
+        else:
+            resolution = self.pipeline.resolve_goal(
+                catalog=session.paper_catalog,
+                goal=UserReproductionGoal(goal_id=f"goal:{session.session_id}:{uuid.uuid4().hex[:10]}", text=goal_text),
+            )
+        resolution = self._apply_remaining_filter(session, resolution, goal_text)
+        session = session.model_copy(update={
+            "pending_goal": goal_text,
+            "pending_goal_resolution": resolution,
+            "pending_clarification_answers": (),
+            "pending_resource_resolution": None,
+            "pending_execution_plan": None,
+            "pending_job_id": None,
+            "updated_at": datetime.now(timezone.utc),
+        })
+        return self._continue_session_after_goal(session, enqueue=True)
+
+    def clarify_session(self, session_id: str, *, principal: str, answers: tuple[str, ...]):
+        session = self._owned_session(session_id, principal)
+        if session.status is not ReproductionSessionStatus.AWAITING_CLARIFICATION or session.pending_goal is None:
+            origin = self._owned_intake(session.origin_intake_id, principal)
+            if origin.state is ReproductionIntakeState.AMBIGUOUS:
+                intake = self.clarify(origin.intake_id, principal=principal, answers=answers)
+                return self._session_for_intake(intake), None
+            raise InvalidSessionStateError("session is not waiting for clarification")
+        enriched = session.pending_goal + "\nUser clarification:\n" + "\n".join(answers)
+        resolution = self.pipeline.resolve_goal(
+            catalog=session.paper_catalog,
+            goal=UserReproductionGoal(goal_id=f"goal:{session.session_id}:{uuid.uuid4().hex[:10]}", text=enriched),
+        )
+        resolution = self._apply_remaining_filter(session, resolution, enriched)
+        session = session.model_copy(update={
+            "pending_goal": enriched,
+            "pending_goal_resolution": resolution,
+            "pending_clarification_answers": (*session.pending_clarification_answers, *answers),
+            "pending_resource_resolution": None,
+            "pending_execution_plan": None,
+            "updated_at": datetime.now(timezone.utc),
+        })
+        return self._continue_session_after_goal(session, enqueue=True)
+
+    def submit_session_resource(self, session_id: str, *, principal: str, requirement_id: str, host_path: str):
+        session = self._owned_session(session_id, principal)
+        if session.status is not ReproductionSessionStatus.WAITING_FOR_RESOURCE or session.pending_resource_resolution is None:
+            origin = self._owned_intake(session.origin_intake_id, principal)
+            if origin.state is ReproductionIntakeState.WAITING_FOR_RESOURCE:
+                intake = self.submit_resource(
+                    origin.intake_id, principal=principal,
+                    requirement_id=requirement_id, host_path=host_path,
+                )
+                return self._session_for_intake(intake), None
+            raise InvalidSessionStateError("session is not waiting for an external resource")
+        report = self.resource_service.register_user_path_and_resume(
+            session.pending_resource_resolution, requirement_id=requirement_id,
+            host_path=host_path, principal=principal,
+            repository_catalog=session.repository_catalog,
+        )
+        session = session.model_copy(update={
+            "pending_resource_resolution": report,
+            "updated_at": datetime.now(timezone.utc),
+        })
+        intake = self._owned_intake(session.origin_intake_id, principal)
+        if not report.ready_to_run:
+            session = session.model_copy(update={"status": ReproductionSessionStatus.WAITING_FOR_RESOURCE})
+            self.persistence.sessions.update(session)
+            return session, None
+        self._event(intake, ReproductionEventType.RESOURCE_RESOLVED, {"requirement_id": requirement_id}, session_id=session.session_id)
+        return self._plan_session_job(session, enqueue=True)
+
+    def start_session(self, session_id: str, *, principal: str):
+        session = self._owned_session(session_id, principal)
+        if session.pending_job_id is None:
+            origin = self._owned_intake(session.origin_intake_id, principal)
+            if origin.job_id is not None and origin.state is ReproductionIntakeState.READY_TO_RUN:
+                return self.start(origin.intake_id, principal=principal)
+            raise InvalidSessionStateError("session has no job ready to run")
+        intake = self._owned_intake(session.origin_intake_id, principal)
+        return self._enqueue_job(session.pending_job_id, intake=intake, session=session)
+
+    def session_events(self, session_id: str, *, principal: str, after_sequence: int = 0):
+        self._owned_session(session_id, principal)
+        if hasattr(self.persistence.events, "list_by_session"):
+            return self.persistence.events.list_by_session(session_id, after_sequence=after_sequence)
+        return ()
+
+    def _continue_after_goal(self, intake: ReproductionIntake, *, session: ReproductionSession | None = None):
         resolution = intake.goal_resolution
         if resolution is None:
             raise APIUseCaseError("analysis omitted goal resolution")
@@ -229,6 +372,11 @@ class ReproductionAPIService:
                 "updated_at": datetime.now(timezone.utc),
             })
             self.persistence.intakes.update(intake)
+            if session is not None:
+                self._set_session_pending(
+                    session, intake,
+                    status=ReproductionSessionStatus.AWAITING_CLARIFICATION,
+                )
             self._event(intake, ReproductionEventType.CLARIFICATION_REQUIRED, {
                 "candidate_experiment_ids": list(resolution.candidate_experiment_ids),
                 "questions": list(resolution.clarification_questions),
@@ -251,6 +399,11 @@ class ReproductionAPIService:
                 "updated_at": datetime.now(timezone.utc),
             })
             self.persistence.intakes.update(intake)
+            if session is not None:
+                self._set_session_pending(
+                    session, intake,
+                    status=ReproductionSessionStatus.WAITING_FOR_RESOURCE,
+                )
             for item in report.resolutions:
                 if item.binding is None:
                     self._event(intake, ReproductionEventType.RESOURCE_REQUIRED, {
@@ -259,9 +412,9 @@ class ReproductionAPIService:
                         "resource_type": item.requirement.resource_type.value,
                     })
             return intake
-        return self._plan_and_prepare_job(intake)
+        return self._plan_and_prepare_job(intake, session=session)
 
-    def _plan_and_prepare_job(self, intake: ReproductionIntake):
+    def _plan_and_prepare_job(self, intake: ReproductionIntake, *, session: ReproductionSession | None = None, enqueue: bool = False):
         if (
             intake.goal_resolution is None
             or intake.goal_resolution.status is not GoalResolutionStatus.RESOLVED
@@ -272,7 +425,13 @@ class ReproductionAPIService:
         if intake.resource_resolution is None or not intake.resource_resolution.ready_to_run:
             raise InvalidIntakeStateError("planning requires all external resources to be available")
         self._event(intake, ReproductionEventType.PLANNING_STARTED, {})
-        plan = self.pipeline.plan(intake=intake)
+        plan = self.pipeline.plan(
+            intake=intake,
+            specification=intake.goal_resolution.specification,
+            paper_catalog=intake.paper_catalog,
+            repository_catalog=intake.repository_catalog,
+            alignment_catalog=intake.alignment_catalog,
+        )
         self._event(intake, ReproductionEventType.PLANNING_COMPLETED, {
             "plan_id": plan.plan_id, "status": plan.status.value,
             "blocker_codes": [item.code for item in plan.blockers],
@@ -284,16 +443,23 @@ class ReproductionAPIService:
                 "updated_at": datetime.now(timezone.utc),
             })
             self.persistence.intakes.update(intake)
+            if session is not None:
+                self._set_session_pending(
+                    session, intake,
+                    status=ReproductionSessionStatus.AWAITING_CLARIFICATION,
+                )
             return intake
 
         job_id = intake.job_id or f"job:{uuid.uuid4().hex}"
         selection = intake.goal_resolution.selection
+        created = intake.job_id is None
         job = ReproductionJob(
             job_id=job_id, owner_principal=intake.owner_principal,
-            paper=intake.paper, user_goal=intake.user_goal, selection=selection,
+            session_id=intake.session_id, paper=intake.paper,
+            user_goal=intake.user_goal, selection=selection,
             status=ReproductionJobStatus.READY,
         )
-        if intake.job_id is None:
+        if created:
             self.persistence.jobs.create(job)
             if hasattr(self.persistence.events, "bind_job"):
                 self.persistence.events.bind_job(intake.intake_id, job_id)
@@ -307,7 +473,229 @@ class ReproductionAPIService:
             "updated_at": datetime.now(timezone.utc),
         })
         self.persistence.intakes.update(intake)
+        if session is not None:
+            session = self._set_session_pending(
+                session, intake,
+                status=ReproductionSessionStatus.ACTIVE, pending_job_id=job_id,
+            )
+        if enqueue:
+            self._enqueue_job(job_id, intake=intake, session=session)
         return intake
+
+    def _continue_session_after_goal(self, session: ReproductionSession, *, enqueue: bool):
+        intake = self._owned_intake(session.origin_intake_id, session.owner_principal)
+        resolution = session.pending_goal_resolution
+        if resolution is None:
+            raise APIUseCaseError("session omitted goal resolution")
+        if resolution.status is not GoalResolutionStatus.RESOLVED:
+            session = session.model_copy(update={
+                "status": ReproductionSessionStatus.AWAITING_CLARIFICATION,
+                "updated_at": datetime.now(timezone.utc),
+            })
+            self.persistence.sessions.update(session)
+            self._event(intake, ReproductionEventType.CLARIFICATION_REQUIRED, {
+                "candidate_experiment_ids": list(resolution.candidate_experiment_ids),
+                "questions": list(resolution.clarification_questions),
+            }, session_id=session.session_id)
+            return session, None
+
+        self._event(intake, ReproductionEventType.EXPERIMENT_SELECTION_RESOLVED, {
+            "selected_experiment_ids": list(resolution.selection.selected_experiment_ids),
+        }, session_id=session.session_id)
+        report = self.resource_service.resolve(
+            intake_id=intake.intake_id, principal=session.owner_principal,
+            selection=resolution.selection, specification=resolution.specification,
+            paper_catalog=session.paper_catalog, repository_catalog=session.repository_catalog,
+        )
+        session = session.model_copy(update={"pending_resource_resolution": report})
+        if not report.ready_to_run:
+            session = session.model_copy(update={
+                "status": ReproductionSessionStatus.WAITING_FOR_RESOURCE,
+                "updated_at": datetime.now(timezone.utc),
+            })
+            self.persistence.sessions.update(session)
+            for item in report.resolutions:
+                if item.binding is None:
+                    self._event(intake, ReproductionEventType.RESOURCE_REQUIRED, {
+                        "requirement_id": item.requirement.requirement_id,
+                        "resource_name": item.requirement.canonical_name,
+                        "resource_type": item.requirement.resource_type.value,
+                    }, session_id=session.session_id)
+            return session, None
+        return self._plan_session_job(session, enqueue=enqueue)
+
+    def _plan_session_job(self, session: ReproductionSession, *, enqueue: bool):
+        resolution = session.pending_goal_resolution
+        if (
+            resolution is None
+            or resolution.status is not GoalResolutionStatus.RESOLVED
+            or resolution.selection is None
+            or not resolution.selection.selected_experiment_ids
+        ):
+            raise InvalidSessionStateError("planning requires a resolved, locked experiment selection")
+        if session.pending_resource_resolution is None or not session.pending_resource_resolution.ready_to_run:
+            raise InvalidSessionStateError("planning requires all external resources to be available")
+        intake = self._owned_intake(session.origin_intake_id, session.owner_principal)
+        self._event(intake, ReproductionEventType.PLANNING_STARTED, {}, session_id=session.session_id)
+        plan = self.pipeline.plan(
+            specification=resolution.specification,
+            paper_catalog=session.paper_catalog,
+            repository_catalog=session.repository_catalog,
+            alignment_catalog=session.alignment_catalog,
+        )
+        self._event(intake, ReproductionEventType.PLANNING_COMPLETED, {
+            "plan_id": plan.plan_id, "status": plan.status.value,
+            "blocker_codes": [item.code for item in plan.blockers],
+        }, session_id=session.session_id)
+        if plan.status is not PlanStatus.READY or plan.blockers:
+            session = session.model_copy(update={
+                "pending_execution_plan": plan,
+                "status": ReproductionSessionStatus.AWAITING_CLARIFICATION,
+                "updated_at": datetime.now(timezone.utc),
+            })
+            self.persistence.sessions.update(session)
+            return session, None
+
+        job_id = f"job:{uuid.uuid4().hex}"
+        job = ReproductionJob(
+            job_id=job_id, owner_principal=session.owner_principal,
+            session_id=session.session_id, paper=session.paper,
+            user_goal=resolution.selection.original_user_goal,
+            selection=resolution.selection,
+            status=ReproductionJobStatus.READY,
+        )
+        self.persistence.jobs.create(job)
+        self.persistence.planning_snapshots.create(AuthoritativePlanningSnapshot(
+            snapshot_id=f"planning-snapshot:{uuid.uuid4().hex}", job_id=job_id,
+            specification=resolution.specification, execution_plan=plan,
+        ))
+        session = session.model_copy(update={
+            "pending_execution_plan": plan,
+            "pending_job_id": job_id,
+            "status": ReproductionSessionStatus.ACTIVE,
+            "updated_at": datetime.now(timezone.utc),
+        })
+        self.persistence.sessions.update(session)
+        if enqueue:
+            job = self._enqueue_job(job_id, intake=intake, session=session)
+        return session, job
+
+    def _enqueue_job(self, job_id: str, *, intake: ReproductionIntake, session: ReproductionSession | None):
+        job = self.persistence.queue.enqueue(job_id)
+        if intake.job_id == job_id:
+            intake = intake.model_copy(update={
+                "state": ReproductionIntakeState.QUEUED,
+                "updated_at": datetime.now(timezone.utc),
+            })
+            self.persistence.intakes.update(intake)
+        if session is not None:
+            updates = {"status": ReproductionSessionStatus.ACTIVE, "updated_at": datetime.now(timezone.utc)}
+            if session.pending_job_id == job_id:
+                updates["pending_job_id"] = None
+                updates["pending_goal"] = None
+                updates["pending_goal_resolution"] = None
+                updates["pending_resource_resolution"] = None
+                updates["pending_execution_plan"] = None
+            session = session.model_copy(update=updates)
+            self.persistence.sessions.update(session)
+        self._event(intake, ReproductionEventType.JOB_QUEUED, {"status": job.status.value}, job_id=job.job_id, session_id=None if session is None else session.session_id)
+        return job
+
+    def _create_session(self, intake: ReproductionIntake, analysis: IntakeAnalysis) -> ReproductionSession:
+        snapshot = analysis.repository_snapshot
+        if snapshot is None:
+            raise APIUseCaseError("analysis omitted a repository snapshot required to lock the session")
+        document = analysis.paper_document
+        paper_hash = document.content_hash if document is not None else analysis.paper.id
+        session = ReproductionSession(
+            session_id=f"session:{uuid.uuid4().hex}",
+            owner_principal=intake.owner_principal,
+            origin_intake_id=intake.intake_id,
+            source_filename=intake.source_filename,
+            repository_url=intake.repository_url,
+            paper=analysis.paper,
+            paper_content_hash=paper_hash,
+            paper_document=document,
+            paper_catalog=analysis.paper_catalog,
+            repository_catalog=analysis.repository_catalog,
+            alignment_catalog=analysis.alignment_catalog,
+            repository_snapshot_id=snapshot.snapshot_id,
+            repository_commit_sha=snapshot.resolved_commit_sha,
+            pending_goal=intake.user_goal,
+            pending_goal_resolution=analysis.goal_resolution,
+        )
+        if not hasattr(self.persistence, "sessions"):
+            raise APIUseCaseError("production persistence omitted the reproduction session repository")
+        self.persistence.sessions.create(session)
+        return session
+
+    def _set_session_pending(
+        self, session: ReproductionSession, intake: ReproductionIntake, *,
+        status: ReproductionSessionStatus, pending_job_id: str | None = None,
+    ) -> ReproductionSession:
+        session = session.model_copy(update={
+            "status": status,
+            "pending_goal": intake.user_goal,
+            "pending_goal_resolution": intake.goal_resolution,
+            "pending_resource_resolution": intake.resource_resolution,
+            "pending_execution_plan": intake.execution_plan,
+            "pending_clarification_answers": intake.clarification_answers,
+            "pending_job_id": pending_job_id if pending_job_id is not None else session.pending_job_id,
+            "updated_at": datetime.now(timezone.utc),
+        })
+        self.persistence.sessions.update(session)
+        return session
+
+    def _sync_session_from_intake(self, intake: ReproductionIntake) -> None:
+        session = self._session_for_intake(intake)
+        if session is None:
+            return
+        status = {
+            ReproductionIntakeState.AMBIGUOUS: ReproductionSessionStatus.AWAITING_CLARIFICATION,
+            ReproductionIntakeState.WAITING_FOR_RESOURCE: ReproductionSessionStatus.WAITING_FOR_RESOURCE,
+        }.get(intake.state, ReproductionSessionStatus.ACTIVE)
+        self._set_session_pending(session, intake, status=status)
+
+    def _apply_remaining_filter(self, session: ReproductionSession, resolution: GoalResolutionResult, goal_text: str):
+        if resolution.status is not GoalResolutionStatus.RESOLVED or resolution.selection is None:
+            return resolution
+        if not self._requests_remaining(goal_text):
+            return resolution
+        jobs = self._jobs_for_session(session.session_id)
+        completed = completed_experiment_ids(jobs)
+        remaining = tuple(
+            item for item in resolution.selection.selected_experiment_ids if item not in completed
+        )
+        if remaining == resolution.selection.selected_experiment_ids:
+            return resolution
+        if not remaining:
+            return GoalResolutionResult(
+                status=GoalResolutionStatus.NOT_FOUND,
+                selection=resolution.selection.model_copy(update={
+                    "selected_experiment_ids": (),
+                    "per_experiment_reasons": {},
+                    "resolution_status": GoalResolutionStatus.NOT_FOUND,
+                    "selection_reason": "会话中没有尚未完成的剩余实验",
+                    "unresolved_mentions": ("剩余实验",),
+                }),
+                reason="会话中没有尚未完成的剩余实验",
+            )
+        return self.pipeline.resolve_experiment_ids(
+            catalog=session.paper_catalog,
+            goal=UserReproductionGoal(goal_id=f"goal:{session.session_id}:remaining", text=goal_text),
+            experiment_ids=remaining,
+        )
+
+    @staticmethod
+    def _requests_remaining(goal_text: str) -> bool:
+        compact = "".join(goal_text.casefold().split())
+        return any("".join(phrase.casefold().split()) in compact for phrase in _REMAINING_PHRASES)
+
+    @staticmethod
+    def _same_append_request(job: ReproductionJob, goal: str | None, experiment_ids: tuple[str, ...] | None) -> bool:
+        if experiment_ids:
+            return tuple(job.selection.selected_experiment_ids) == tuple(experiment_ids)
+        return goal is not None and job.user_goal == goal
 
     def _owned_intake(self, intake_id: str, principal: str):
         try:
@@ -318,14 +706,55 @@ class ReproductionAPIService:
             raise EntityNotFoundError("intake not found")
         return intake
 
+    def _owned_session(self, session_id: str, principal: str) -> ReproductionSession:
+        if not hasattr(self.persistence, "sessions"):
+            raise EntityNotFoundError("session not found")
+        try:
+            session = self.persistence.sessions.get(session_id)
+        except PersistenceEntityNotFoundError as exc:
+            raise EntityNotFoundError("session not found") from exc
+        if session.owner_principal != principal:
+            raise EntityNotFoundError("session not found")
+        return session
+
+    def _session_for_intake(self, intake: ReproductionIntake) -> ReproductionSession | None:
+        if not hasattr(self.persistence, "sessions"):
+            return None
+        if intake.session_id:
+            try:
+                return self.persistence.sessions.get(intake.session_id)
+            except PersistenceEntityNotFoundError:
+                return None
+        getter = getattr(self.persistence.sessions, "get_by_intake", None)
+        if getter is None:
+            return None
+        return getter(intake.intake_id)
+
+    def _jobs_for_session(self, session_id: str) -> tuple[ReproductionJob, ...]:
+        if hasattr(self.persistence.jobs, "list_by_session"):
+            return self.persistence.jobs.list_by_session(session_id)
+        return tuple(job for job in self.persistence.jobs.list() if job.session_id == session_id)
+
     def _intake_for_job(self, job_id: str, principal: str):
         intake = next((item for item in self.persistence.intakes.list_by_owner(principal) if item.job_id == job_id), None)
-        if intake is None:
-            raise EntityNotFoundError("reproduction not found")
-        return intake
+        if intake is not None:
+            return intake
+        try:
+            job = self.persistence.jobs.get(job_id)
+        except PersistenceEntityNotFoundError as exc:
+            raise EntityNotFoundError("reproduction not found") from exc
+        if job.session_id:
+            session = self._owned_session(job.session_id, principal)
+            return self._owned_intake(session.origin_intake_id, principal)
+        raise EntityNotFoundError("reproduction not found")
 
-    def _event(self, intake, event_type, payload, *, job_id=None):
-        return self.persistence.events.append(
-            intake_id=intake.intake_id, owner_principal=intake.owner_principal,
-            job_id=job_id or intake.job_id, event_type=event_type, payload=payload,
-        )
+    def _event(self, intake, event_type, payload, *, job_id=None, session_id=None):
+        kwargs = {
+            "intake_id": intake.intake_id, "owner_principal": intake.owner_principal,
+            "job_id": job_id or intake.job_id, "event_type": event_type, "payload": payload,
+        }
+        bound_session = session_id if session_id is not None else intake.session_id
+        try:
+            return self.persistence.events.append(session_id=bound_session, **kwargs)
+        except TypeError:
+            return self.persistence.events.append(**kwargs)

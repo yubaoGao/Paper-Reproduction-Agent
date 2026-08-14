@@ -15,45 +15,56 @@ class ResourceRegistrationError(ValueError):
 class TrustedResourceRegistry:
     def __init__(self, resources=()) -> None:
         self._resources = {}
+        self._lock = RLock()
         for resource in resources:
             self.register(resource)
 
     def register(self, resource: RegisteredResource) -> None:
-        if resource.resource_id in self._resources:
-            raise ResourceRegistrationError("resource ID is already registered")
-        if resource.kind is ResourceKind.HOST_PATH:
-            path = Path(resource.host_path).resolve(strict=True)
-            resource = resource.model_copy(update={"host_path": str(path)})
-        self._resources[resource.resource_id] = resource
+        with self._lock:
+            if resource.resource_id in self._resources:
+                raise ResourceRegistrationError("resource ID is already registered")
+            if resource.kind is ResourceKind.HOST_PATH:
+                path = Path(resource.host_path).resolve(strict=True)
+                resource = resource.model_copy(update={"host_path": str(path)})
+            self._resources[resource.resource_id] = resource
 
     def register_or_validate(self, resource: RegisteredResource) -> None:
         """Idempotently register one exact resource; never replace an existing ID."""
-        existing = self._resources.get(resource.resource_id)
-        if existing is None:
-            self.register(resource)
-            return
-        candidate = resource
-        if resource.kind is ResourceKind.HOST_PATH:
-            candidate = resource.model_copy(
-                update={"host_path": str(Path(resource.host_path).resolve(strict=True))}
-            )
-        if existing != candidate:
-            raise ResourceRegistrationError("resource ID is registered with different metadata")
+        with self._lock:
+            existing = self._resources.get(resource.resource_id)
+            if existing is None:
+                if resource.kind is ResourceKind.HOST_PATH:
+                    resource = resource.model_copy(
+                        update={"host_path": str(Path(resource.host_path).resolve(strict=True))}
+                    )
+                if resource.resource_id in self._resources:
+                    raise ResourceRegistrationError("resource ID is already registered")
+                self._resources[resource.resource_id] = resource
+                return
+            candidate = resource
+            if resource.kind is ResourceKind.HOST_PATH:
+                candidate = resource.model_copy(
+                    update={"host_path": str(Path(resource.host_path).resolve(strict=True))}
+                )
+            if existing != candidate:
+                raise ResourceRegistrationError("resource ID is registered with different metadata")
 
     def resolve(self, resource_id: str) -> RegisteredResource:
-        try:
-            return self._resources[resource_id]
-        except KeyError as exc:
-            raise ResourceRegistrationError(
-                f"resource {resource_id!r} is not registered"
-            ) from exc
+        with self._lock:
+            try:
+                return self._resources[resource_id]
+            except KeyError as exc:
+                raise ResourceRegistrationError(
+                    f"resource {resource_id!r} is not registered"
+                ) from exc
 
     def remove_run_resources(self, run_id: str) -> None:
-        self._resources = {
-            key: value
-            for key, value in self._resources.items()
-            if value.owner_run_id != run_id
-        }
+        with self._lock:
+            self._resources = {
+                key: value
+                for key, value in self._resources.items()
+                if value.owner_run_id != run_id
+            }
 
 
 class RunResourceRegistry:

@@ -162,6 +162,33 @@ class ReproductionGoalResolver:
             deterministic["unresolved"],
         )
 
+    def resolve_from_ids(
+        self,
+        catalog: PaperExperimentCatalog,
+        goal: UserReproductionGoal,
+        experiment_ids: tuple[str, ...],
+    ) -> GoalResolutionResult:
+        known = {record.experiment_id: record for record in catalog.experiments}
+        missing = tuple(item for item in experiment_ids if item not in known)
+        if missing:
+            return self._not_found(
+                goal,
+                SelectionMode.EXPLICIT,
+                "指定的实验不在 PaperExperimentCatalog 中",
+                missing,
+            )
+        if not experiment_ids:
+            return self._not_found(goal, SelectionMode.EXPLICIT, "没有指定实验")
+        records = tuple(known[item] for item in dict.fromkeys(experiment_ids))
+        return self._resolved(
+            catalog,
+            goal,
+            SelectionMode.EXPLICIT,
+            records,
+            (),
+            "用户明确指定了要复现的实验 ID",
+        )
+
     @staticmethod
     def _has_explicit_scope(catalog, text):
         if _contains_any(

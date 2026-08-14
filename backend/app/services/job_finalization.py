@@ -34,7 +34,11 @@ class JobResultFinalizer:
             ),
             None,
         )
-        if intake is None or intake.paper_catalog is None:
+        paper_catalog = None if intake is None else intake.paper_catalog
+        if paper_catalog is None and getattr(job, "session_id", None) and hasattr(self.persistence, "sessions"):
+            session = self.persistence.sessions.get(job.session_id)
+            paper_catalog = session.paper_catalog
+        if paper_catalog is None:
             raise JobFinalizationError("job has no authoritative paper catalog")
 
         # Aggregate actions follow their run-producing actions in the locked
@@ -76,7 +80,7 @@ class JobResultFinalizer:
 
         report = self.comparator.compare(
             job.selection,
-            intake.paper_catalog,
+            paper_catalog,
             final_results,
         )
         existing = {

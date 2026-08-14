@@ -82,7 +82,7 @@ class PypdfPaperParser(PaperParser):
         )
 
     def _heuristic_sections(self, pages: list[PageBlock]) -> list[SectionBlock]:
-        found: list[tuple[str, str, int, int]] = []
+        found: list[tuple[str, int, int]] = []
         for page in pages:
             for line in page.text.splitlines():
                 match = _HEADING.fullmatch(line.strip())
@@ -91,19 +91,17 @@ class PypdfPaperParser(PaperParser):
                 number, title = match.groups()
                 if number:
                     level = number.count(".") + 1
-                    section_id = number
                 elif title.upper() == title and len(title.split()) <= 10:
                     level = 1
-                    section_id = str(len(found) + 1)
                 else:
                     continue
-                found.append((section_id, title.strip(), level, page.page_number))
+                found.append((title.strip(), level, page.page_number))
         sections: list[SectionBlock] = []
-        for index, (section_id, title, level, start_page) in enumerate(found):
-            end_page = found[index + 1][3] if index + 1 < len(found) else len(pages)
+        for index, (title, level, start_page) in enumerate(found, start=1):
+            end_page = found[index][2] if index < len(found) else len(pages)
             sections.append(
                 SectionBlock(
-                    section_id=section_id,
+                    section_id=str(index),
                     title=title,
                     level=level,
                     start_page=start_page,

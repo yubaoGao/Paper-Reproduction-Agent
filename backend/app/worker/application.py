@@ -22,9 +22,7 @@ from backend.app.infrastructure.sandbox import (
     DockerEngineBackend,
     DockerSandboxCommandExecutionAdapter,
     DockerSandboxWorkspaceAdapter,
-    EnvironmentBroker,
     EnvironmentProvisioner,
-    HostEnvironmentCatalog,
     HostMutationGuard,
     LinuxSandboxManager,
     MountCategory,
@@ -32,12 +30,14 @@ from backend.app.infrastructure.sandbox import (
     RunLogStore,
     RunResourceRegistry,
     SandboxArtifactCollectionAdapter,
+    SandboxEnvironmentProbe,
     SandboxPolicyViolation,
     SandboxRuntimeService,
     SandboxSessionRegistry,
     TrustedResourceRegistry,
     ResourceKind,
 )
+from backend.app.infrastructure.sandbox.assets import wire_production_environment_reuse
 from backend.app.orchestration import OOMAdaptationCoordinator, ReproductionOrchestrator
 from backend.app.orchestration.resource_adaptation import ResourceExecutionProfile
 from backend.app.orchestration.worker import ReproductionWorker
@@ -207,12 +207,18 @@ def build_production_worker(
         RunResourceRegistry(),
     )
     sandbox_sessions = SandboxSessionRegistry()
+    asset_root = Path(data_root if data_root is not None else host_roots[0])
+    probe = SandboxEnvironmentProbe(manager, trusted, base_image_digest=image)
+    broker, promoter, store, _catalog = wire_production_environment_reuse(
+        data_root=asset_root,
+        resource_registry=trusted,
+        base_image_digest=image,
+        manager=manager,
+        probe=probe,
+    )
     runtime_service = SandboxRuntimeService(
         manager=manager,
-        environment_broker=EnvironmentBroker(
-            HostEnvironmentCatalog(resource_registry=trusted),
-            base_image_digest=image,
-        ),
+        environment_broker=broker,
         resource_registry=trusted,
         session_registry=sandbox_sessions,
         provisioner=EnvironmentProvisioner(manager),
@@ -220,6 +226,7 @@ def build_production_worker(
         gpu_lease_provider=persistence.gpu_scheduler,
         external_resource_binding_provider=persistence.resources,
         repository_snapshot_provider=persistence.repository_snapshots,
+        artifact_promoter=promoter,
     )
     workspace = DockerSandboxWorkspaceAdapter(runtime_service)
     command = DockerSandboxCommandExecutionAdapter(
@@ -262,6 +269,7 @@ def build_production_worker(
             external_resource_reference_provider=external,
             product_event_publisher=publisher,
             job_id=job.job_id,
+            owner_principal=job.owner_principal,
         )
 
     return ReproductionWorker(

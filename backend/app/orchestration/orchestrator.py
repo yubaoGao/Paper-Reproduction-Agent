@@ -79,6 +79,7 @@ class ReproductionOrchestrator:
         external_resource_reference_provider=None,
         product_event_publisher=None,
         job_id=None,
+        owner_principal=None,
     ) -> None:
         self.repository = repository
         self.command_port = command_port
@@ -95,6 +96,7 @@ class ReproductionOrchestrator:
         self.external_resource_reference_provider = external_resource_reference_provider
         self.product_event_publisher = product_event_publisher
         self.job_id = job_id
+        self.owner_principal = owner_principal or "system:anonymous"
         self.state_machine = RunStateMachine()
         self.dispatcher = ExecutionDispatcher(self.state_machine)
         self.patch_coordinator = (
@@ -185,6 +187,7 @@ class ReproductionOrchestrator:
         context = self.context_factory.create(
             plan, experiment.id, runtime_run_id, action=action,
             external_resources=self._external_resources(experiment),
+            owner_principal=self.owner_principal,
         )
         run = self._transition_step(run, step_id, StepStatus.PREPARING)
         first_attempt = len(step_record.attempts) + 1

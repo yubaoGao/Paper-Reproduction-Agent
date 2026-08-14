@@ -16,7 +16,7 @@ from backend.app.runtime.state import run_namespace, run_thread_id
 class PlanStepContextFactory:
     def create(
         self, plan: ReproductionExecutionPlan, step_id: str, runtime_run_id: str,
-        *, action=None, external_resources=(),
+        *, action=None, external_resources=(), owner_principal: str | None = None,
     ):
         experiment = next(item for item in plan.experiments if item.id == step_id)
         command = action.command if action is not None else experiment.resolved_command
@@ -109,6 +109,7 @@ class PlanStepContextFactory:
                 f"Execute authoritative plan {plan.plan_id}, step {experiment.id}; "
                 "do not redefine its scientific target or parameters."
             ),
+            owner_principal=owner_principal or "system:anonymous",
         )
 
     @staticmethod

@@ -7,6 +7,11 @@ from .adapters import (
     SandboxArtifactCollectionAdapter,
     SecretProvider,
 )
+from .assets import (
+    EnvironmentArtifactPromoter,
+    FilesystemEnvironmentAssetStore,
+    wire_production_environment_reuse,
+)
 from .environment import (
     EnvironmentBroker,
     HostEnvironmentCatalog,

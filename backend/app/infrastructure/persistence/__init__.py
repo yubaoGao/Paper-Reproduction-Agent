@@ -18,6 +18,7 @@ from .repositories import (
     PostgresReproductionIntakeRepository,
     PostgresReproductionJobRepository,
     PostgresReproductionRunRepository,
+    PostgresReproductionSessionRepository,
 )
 from .serialization import deserialize_domain, serialize_domain
 
@@ -39,6 +40,7 @@ __all__ = [
     "PostgresReproductionIntakeRepository",
     "PostgresReproductionJobRepository",
     "PostgresReproductionRunRepository",
+    "PostgresReproductionSessionRepository",
     "deserialize_domain",
     "serialize_domain",
 ]

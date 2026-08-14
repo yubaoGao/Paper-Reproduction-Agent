@@ -67,7 +67,7 @@ _ALLOWED_WRITE_ROOTS = {
     "/home/sandbox",
 }
 _CATEGORY_TARGET_ROOTS = {
-    MountCategory.REGISTERED_ENV_READ_ONLY: ("/opt/reused-env",),
+    MountCategory.REGISTERED_ENV_READ_ONLY: ("/opt/reused-env", "/sandbox-env"),
     MountCategory.REGISTERED_PACKAGE_CACHE_READ_ONLY: ("/seed-cache",),
     MountCategory.REPOSITORY_SNAPSHOT_READ_ONLY: ("/source/repository",),
     MountCategory.DATASET_READ_ONLY: ("/datasets",),

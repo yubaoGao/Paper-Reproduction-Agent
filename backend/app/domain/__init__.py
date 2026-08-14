@@ -131,6 +131,10 @@ from .product_events import (
     ReproductionEvent, ReproductionEventType, ReproductionIntake,
     ReproductionIntakeState,
 )
+from .session import (
+    ExperimentJobHistoryItem, ReproductionSession, ReproductionSessionStatus,
+    SessionExperimentProjection, SessionExperimentStatus, intake_state_for_session,
+)
 
 __all__ = [
     "AblationDefinition",
@@ -222,6 +226,8 @@ __all__ = [
     "ValidationPhase","ValidationRecord",
     "ReproductionEvent","ReproductionEventType","ReproductionIntake",
     "ReproductionIntakeState",
+    "ExperimentJobHistoryItem","ReproductionSession","ReproductionSessionStatus",
+    "SessionExperimentProjection","SessionExperimentStatus","intake_state_for_session",
     "ComparisonEvidenceChain","ComparisonPolicyKind","ExecutionFailureReference",
     "ExperimentComparison","ExperimentComparisonStatus","MetricComparison",
     "MetricComparisonPolicy","MetricComparisonStatus","MetricIdentity","ReproductionComparisonReport",

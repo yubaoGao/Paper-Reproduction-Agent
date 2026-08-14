@@ -11,13 +11,14 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import type {
   ComparisonReport, FinalMetric, FinalResult, Intake, JobDetail,
-  MetricComparison, ProductEvent, ResourceAdaptation,
+  MetricComparison, ProductEvent, ReproductionSession, ResourceAdaptation,
 } from "../api/types";
 import { compactId, elapsed, formatTime, humanize, numberValue, stringValue } from "../utils/presentation";
 import { StatusPill } from "./StatusPill";
 
 interface Props {
   intake?: Intake;
+  session?: ReproductionSession;
   job?: JobDetail;
   events: ProductEvent[];
   results?: FinalResult[];
@@ -56,7 +57,27 @@ function Overview({ intake, job }: Pick<Props, "intake" | "job">) {
   );
 }
 
-function Experiments({ intake, job, events }: Pick<Props, "intake" | "job" | "events">) {
+function Experiments({ intake, session, job, events }: Pick<Props, "intake" | "session" | "job" | "events">) {
+  if (session?.experiments.length) {
+    return (
+      <div className="inspector-section">
+        <p className="section-intro">实验状态由会话中的任务历史投影得出，未选择不等于失败。</p>
+        {session.experiments.map((experiment, index) => (
+          <Card size="small" className="experiment-card" key={experiment.experiment_id}>
+            <div className="experiment-number">{String(index + 1).padStart(2, "0")}</div>
+            <div className="experiment-info">
+              <strong>{experiment.experiment_id}</strong>
+              <span>{experiment.name}</span>
+              {experiment.job_history.length > 0 && (
+                <small>历史任务 {experiment.job_history.length} 个</small>
+              )}
+            </div>
+            <StatusPill status={experiment.status} />
+          </Card>
+        ))}
+      </div>
+    );
+  }
   const selected = job?.selected_experiment_ids ?? intake?.selected_experiment_ids ?? [];
   const statusByExperiment = new Map<string, string>();
   events.forEach((event) => {
@@ -300,7 +321,7 @@ function evidenceSummary(chain?: Record<string, unknown>): string {
 export function Inspector(props: Props) {
   const items = [
     { key: "overview", label: <span><AimOutlined /> 概览</span>, children: <Overview intake={props.intake} job={props.job} /> },
-    { key: "experiments", label: <span><ExperimentOutlined /> 实验</span>, children: <Experiments intake={props.intake} job={props.job} events={props.events} /> },
+    { key: "experiments", label: <span><ExperimentOutlined /> 实验</span>, children: <Experiments intake={props.intake} session={props.session} job={props.job} events={props.events} /> },
     { key: "execution", label: <span><ApartmentOutlined /> 执行</span>, children: <Execution job={props.job} events={props.events} /> },
     { key: "resources", label: <span><DatabaseOutlined /> 资源</span>, children: <Resources intake={props.intake} job={props.job} events={props.events} /> },
     { key: "results", label: <span><FileDoneOutlined /> 结果</span>, children: <Results results={props.results} comparison={props.comparison} loading={props.resultsLoading} /> },

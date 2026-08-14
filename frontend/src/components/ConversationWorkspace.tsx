@@ -5,14 +5,32 @@ import {
   SendOutlined, StopOutlined,
 } from "@ant-design/icons";
 import { Alert, Button, Card, Divider, Input, List, Progress, Space, Spin, Tag, Typography } from "antd";
-import type { Intake, JobDetail, ProductEvent, ResourceRequirement } from "../api/types";
-import { humanize, numberValue } from "../utils/presentation";
+import type {
+  Intake, JobDetail, ProductEvent, ReproductionSession, ResourceRequirement, SessionExperiment,
+} from "../api/types";
+import { humanize, isTerminal, numberValue } from "../utils/presentation";
 import { NewReproductionForm } from "./NewReproductionForm";
 import { ProductEventTimeline } from "./ProductEventTimeline";
 import { StatusPill } from "./StatusPill";
 
+interface ClarificationTarget {
+  candidate_experiment_ids: string[];
+  clarification_questions: string[];
+}
+
+interface ReadyTarget {
+  selected_experiment_ids: string[];
+  required_resources: ResourceRequirement[];
+  planning_status?: string | null;
+}
+
+interface ResourceTarget {
+  required_resources: ResourceRequirement[];
+}
+
 interface Props {
   intake?: Intake;
+  session?: ReproductionSession;
   job?: JobDetail;
   events: ProductEvent[];
   loading: boolean;
@@ -25,15 +43,18 @@ interface Props {
   onResource: (requirementId: string, hostPath: string) => void;
   onStart: () => void;
   onCancel: () => void;
+  onAppendGoal?: (goal: string) => void;
+  onRunExperiment?: (experimentId: string) => void;
 }
 
-function UserPrompt({ intake, job }: { intake?: Intake; job?: JobDetail }) {
-  const goal = intake?.goal ?? job?.goal;
+function UserPrompt({ intake, session, job }: { intake?: Intake; session?: ReproductionSession; job?: JobDetail }) {
+  const goal = session?.goal ?? intake?.goal ?? job?.goal;
+  const repository = session?.repository_url ?? intake?.repository_url;
   if (!goal) return null;
   return (
     <div className="message-row user-message-row">
       <div className="message user-message">
-        {intake?.repository_url && <div className="message-context">代码仓库 · {intake.repository_url}</div>}
+        {repository && <div className="message-context">代码仓库 · {repository}</div>}
         <div>{goal}</div>
       </div>
     </div>
@@ -49,7 +70,7 @@ function AnalyzingCard() {
   );
 }
 
-function AmbiguousFlow({ intake, loading, onClarify }: { intake: Intake; loading: boolean; onClarify: (answers: string[]) => void }) {
+function AmbiguousFlow({ target, loading, onClarify }: { target: ClarificationTarget; loading: boolean; onClarify: (answers: string[]) => void }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [answer, setAnswer] = useState("");
   const submit = () => {
@@ -61,7 +82,7 @@ function AmbiguousFlow({ intake, loading, onClarify }: { intake: Intake; loading
       <div className="assistant-label"><QuestionCircleOutlined /> 目标解析器</div>
       <h3>发现了多个可能的实验，请确认要复现的范围。</h3>
       <div className="candidate-grid">
-        {intake.candidate_experiment_ids.map((id) => {
+        {target.candidate_experiment_ids.map((id) => {
           const active = selected.includes(id);
           return (
             <button
@@ -76,7 +97,7 @@ function AmbiguousFlow({ intake, loading, onClarify }: { intake: Intake; loading
           );
         })}
       </div>
-      {intake.clarification_questions.map((question) => <p className="clarification-question" key={question}>{question}</p>)}
+      {target.clarification_questions.map((question) => <p className="clarification-question" key={question}>{question}</p>)}
       <Input.TextArea value={answer} onChange={(event) => setAnswer(event.target.value)} rows={3} placeholder="补充说明、约束条件或准确的实验名称……" />
       <Button type="primary" icon={<SendOutlined />} loading={loading} disabled={!selected.length && !answer.trim()} onClick={submit}>继续分析</Button>
     </div>
@@ -106,8 +127,8 @@ function ResourceCard({ resource, loading, onSubmit }: { resource: ResourceRequi
   );
 }
 
-function MissingResourceFlow({ intake, loading, onResource }: { intake: Intake; loading: boolean; onResource: Props["onResource"] }) {
-  const missing = intake.required_resources.filter((resource) => resource.required && resource.status !== "available");
+function MissingResourceFlow({ target, loading, onResource }: { target: ResourceTarget; loading: boolean; onResource: Props["onResource"] }) {
+  const missing = target.required_resources.filter((resource) => resource.required && resource.status !== "available");
   return (
     <div className="assistant-message flow-message wide-message">
       <div className="assistant-label warning"><DatabaseOutlined /> 资源助手</div>
@@ -120,18 +141,18 @@ function MissingResourceFlow({ intake, loading, onResource }: { intake: Intake; 
   );
 }
 
-function ReadyFlow({ intake, loading, onStart }: { intake: Intake; loading: boolean; onStart: () => void }) {
-  const available = intake.required_resources.filter((resource) => resource.status === "available").length;
+function ReadyFlow({ target, loading, onStart }: { target: ReadyTarget; loading: boolean; onStart: () => void }) {
+  const available = target.required_resources.filter((resource) => resource.status === "available").length;
   return (
     <div className="assistant-message flow-message ready-message">
       <div className="assistant-label success"><CheckCircleOutlined /> 规划器</div>
       <h3>复现计划已准备就绪。</h3>
       <div className="ready-summary">
-        <div><span>已选实验</span><strong>{intake.selected_experiment_ids.length}</strong></div>
-        <div><span>资源就绪</span><strong>{available} / {intake.required_resources.length}</strong></div>
-        <div><span>规划状态</span><strong>{humanize(intake.planning_status ?? "ready")}</strong></div>
+        <div><span>已选实验</span><strong>{target.selected_experiment_ids.length}</strong></div>
+        <div><span>资源就绪</span><strong>{available} / {target.required_resources.length}</strong></div>
+        <div><span>规划状态</span><strong>{humanize(target.planning_status ?? "ready")}</strong></div>
       </div>
-      <div className="selected-tags">{intake.selected_experiment_ids.map((id) => <Tag key={id}>{id}</Tag>)}</div>
+      <div className="selected-tags">{target.selected_experiment_ids.map((id) => <Tag key={id}>{id}</Tag>)}</div>
       <Button size="large" type="primary" icon={<PlayCircleOutlined />} loading={loading} onClick={onStart}>开始复现</Button>
       <small>点击开始后，任务才会进入持久化执行队列。</small>
     </div>
@@ -155,22 +176,87 @@ function JobStateMessage({ job, loading, onCancel }: { job: JobDetail; loading: 
   );
 }
 
+function ExperimentCatalog({ experiments, loading, onRun }: { experiments: SessionExperiment[]; loading: boolean; onRun?: (experimentId: string) => void }) {
+  if (!experiments.length) return null;
+  return (
+    <div className="assistant-message flow-message experiment-catalog">
+      <div className="assistant-label"><ExperimentOutlined /> 实验目录</div>
+      <h3>当前论文实验状态</h3>
+      <div className="session-experiment-list">
+        {experiments.map((experiment) => (
+          <div className="session-experiment-row" key={experiment.experiment_id}>
+            <div>
+              <strong>{experiment.experiment_id}</strong>
+              <span>{experiment.name}</span>
+              {experiment.job_history.length > 1 && (
+                <small className="run-history">
+                  运行历史 · {experiment.job_history.map((item) => `${item.job_id.split(":").at(-1)?.slice(0, 6)} ${humanize(item.status)}`).join(" / ")}
+                </small>
+              )}
+            </div>
+            <div className="session-experiment-actions">
+              <StatusPill status={experiment.status} />
+              {experiment.status === "not_selected" && onRun && (
+                <Button size="small" icon={<PlayCircleOutlined />} loading={loading} onClick={() => onRun(experiment.experiment_id)}>复现</Button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SessionComposer({ disabled, loading, onSubmit }: { disabled: boolean; loading: boolean; onSubmit: (goal: string) => void }) {
+  const [goal, setGoal] = useState("");
+  const submit = () => {
+    const value = goal.trim();
+    if (!value) return;
+    onSubmit(value);
+    setGoal("");
+  };
+  return (
+    <div className="session-composer" data-testid="session-composer">
+      <Input.TextArea
+        value={goal}
+        onChange={(event) => setGoal(event.target.value)}
+        rows={3}
+        disabled={disabled}
+        placeholder="继续复现其他实验，例如：继续复现消融实验 B"
+        onPressEnter={(event) => {
+          if (!event.shiftKey) {
+            event.preventDefault();
+            submit();
+          }
+        }}
+      />
+      <Button type="primary" icon={<SendOutlined />} loading={loading} disabled={disabled || !goal.trim()} onClick={submit}>追加实验</Button>
+    </div>
+  );
+}
+
 export function ConversationWorkspace(props: Props) {
-  const { intake, job, events, loading, creating, actionLoading, error, streamStatus } = props;
+  const { intake, session, job, events, loading, creating, actionLoading, error, streamStatus } = props;
   const latestEpoch = useMemo(() => [...events].reverse().find((event) => event.type === "EPOCH_PROGRESS"), [events]);
-  if (!intake && !job && !creating) {
+  const clarifying = session?.status === "awaiting_clarification" || intake?.state === "ambiguous";
+  const waitingResource = session?.status === "waiting_for_resource" || intake?.state === "waiting_for_resource";
+  const readyToRun = Boolean(session?.pending_job_id) || intake?.state === "ready_to_run";
+  const analyzing = creating || loading || intake?.state === "analyzing";
+  const canAppend = Boolean(session) && !analyzing && !clarifying && !waitingResource;
+  if (!intake && !job && !session && !creating) {
     return <main className="conversation-panel"><NewReproductionForm loading={creating} error={error} onSubmit={props.onCreate} /></main>;
   }
   return (
     <main className="conversation-panel">
       <header className="conversation-header">
-        <div><span className="eyebrow">复现工作区</span><h2>{intake?.goal ?? job?.goal ?? "正在分析复现任务"}</h2></div>
-        <div className="conversation-status"><StatusPill status={intake?.state ?? job?.state ?? "analyzing"} />{job && <span className={`stream-state ${streamStatus}`}>SSE · {humanize(streamStatus)}</span>}</div>
+        <div><span className="eyebrow">复现工作区</span><h2>{session?.goal ?? intake?.goal ?? job?.goal ?? "正在分析复现任务"}</h2></div>
+        <div className="conversation-status"><StatusPill status={session?.status ?? intake?.state ?? job?.state ?? "analyzing"} />{job && <span className={`stream-state ${streamStatus}`}>SSE · {humanize(streamStatus)}</span>}</div>
       </header>
       <div className="conversation-scroll">
-        <UserPrompt intake={intake} job={job} />
-        {(creating || loading || intake?.state === "analyzing") && <AnalyzingCard />}
+        <UserPrompt intake={intake} session={session} job={job} />
+        {analyzing && <AnalyzingCard />}
         {error && <Alert type="error" showIcon message="ReproPilot 无法继续执行" description={error} closable />}
+        {session && <ExperimentCatalog experiments={session.experiments} loading={actionLoading} onRun={props.onRunExperiment} />}
         <ProductEventTimeline events={events} />
         {latestEpoch && (
           <div className="live-epoch-strip">
@@ -179,12 +265,33 @@ export function ConversationWorkspace(props: Props) {
             <Typography.Text type="secondary">过程指标仅为实时信号，并非最终结果。</Typography.Text>
           </div>
         )}
-        {intake?.state === "ambiguous" && <AmbiguousFlow intake={intake} loading={actionLoading} onClarify={props.onClarify} />}
-        {intake?.state === "waiting_for_resource" && <MissingResourceFlow intake={intake} loading={actionLoading} onResource={props.onResource} />}
-        {intake?.state === "ready_to_run" && <ReadyFlow intake={intake} loading={actionLoading} onStart={props.onStart} />}
+        {clarifying && (
+          <AmbiguousFlow
+            target={session ?? intake!}
+            loading={actionLoading}
+            onClarify={props.onClarify}
+          />
+        )}
+        {waitingResource && (
+          <MissingResourceFlow
+            target={session ?? intake!}
+            loading={actionLoading}
+            onResource={props.onResource}
+          />
+        )}
+        {readyToRun && !clarifying && !waitingResource && (
+          <ReadyFlow
+            target={session ?? intake!}
+            loading={actionLoading}
+            onStart={props.onStart}
+          />
+        )}
         {job && <JobStateMessage job={job} loading={actionLoading} onCancel={props.onCancel} />}
-        <Divider plain>当前活动已结束</Divider>
+        {job && isTerminal(job.state) && !session && <Divider plain>当前活动已结束</Divider>}
       </div>
+      {session && props.onAppendGoal && (
+        <SessionComposer disabled={!canAppend} loading={actionLoading} onSubmit={props.onAppendGoal} />
+      )}
     </main>
   );
 }

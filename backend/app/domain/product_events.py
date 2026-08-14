@@ -66,6 +66,7 @@ class ReproductionEvent(DomainModel):
     event_id: NonEmptyStr
     sequence: int = Field(ge=1)
     intake_id: NonEmptyStr
+    session_id: NonEmptyStr | None = None
     job_id: NonEmptyStr | None = None
     owner_principal: NonEmptyStr
     event_type: ReproductionEventType
@@ -97,6 +98,7 @@ class ReproductionEvent(DomainModel):
 class ReproductionIntake(DomainModel):
     intake_id: NonEmptyStr
     owner_principal: NonEmptyStr
+    session_id: NonEmptyStr | None = None
     source_filename: NonEmptyStr
     repository_url: NonEmptyStr
     user_goal: NonEmptyStr

@@ -51,7 +51,8 @@ $REPROPILOT_DATA_ROOT/datasets
 $REPROPILOT_DATA_ROOT/checkpoints
 $REPROPILOT_DATA_ROOT/runs
 $REPROPILOT_DATA_ROOT/artifacts
-$REPROPILOT_DATA_ROOT/cache
+$REPROPILOT_DATA_ROOT/cache/packages
+$REPROPILOT_DATA_ROOT/environments/prepared
 ```
 
 ## Workspace、Dataset 与 Checkpoint
@@ -70,7 +71,7 @@ GPU Scheduler 不在 Task 10。Sandbox 仅接受 `AssignedDeviceSet` 的明确 d
 
 ## 生命周期、审计与清理
 
-`RunResourceRegistry` 记录当前 run 创建的 exact container/volume/network/temporary-image ID。Cleanup 逐 ID 删除，禁止模糊名称删除和任何 prune。`SandboxAuditRecord` 记录 image digest、环境策略、mount 类别、limits、network policy、assigned GPU、安全选项、时间和 cleanup 结果，不记录 secret。
+`RunResourceRegistry` 记录当前 run 创建的 exact container/volume/network/temporary-image ID。Cleanup 逐 ID 删除，禁止模糊名称删除和任何 prune。Persistent package cache 与 prepared environment 没有 `owner_run_id`，不随 Run cleanup 删除。`SandboxAuditRecord` 记录 image digest、环境策略、mount 类别、limits、network policy、assigned GPU、安全选项、时间和 cleanup 结果，不记录 secret。
 
 `DockerSandboxWorkspaceAdapter.cleanup(run_id)` 应在正式 artifact storage 完成引用持久化后调用。失败的 provisioning/materialization 会立即清理当前 run 资源。Rootless Docker 或 userns-remap 优先；`capabilities()` 会报告部署模式、seccomp、cgroup 和 NVIDIA runtime 能力，不会为了 GPU 自动降低安全设置。
 

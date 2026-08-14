@@ -60,6 +60,7 @@ export function useReproductionEvents(jobId?: string | null) {
         }
         if (["JOB_SUCCEEDED", "JOB_FAILED", "JOB_CANCELLED", "JOB_QUEUED"].includes(event.type)) {
           void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+          void queryClient.invalidateQueries({ queryKey: ["session"] });
         }
       },
       setStatus,

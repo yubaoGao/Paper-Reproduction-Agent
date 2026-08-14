@@ -7,6 +7,19 @@ export type IntakeState =
   | "running"
   | "terminal";
 
+export type SessionStatus =
+  | "active"
+  | "awaiting_clarification"
+  | "waiting_for_resource";
+
+export type SessionExperimentStatus =
+  | "not_selected"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
 export type JobState =
   | "pending"
   | "planning"
@@ -44,12 +57,14 @@ export interface Intake {
   planning_blockers: Array<Record<string, unknown>>;
   waiting_reason?: string | null;
   job_id?: string | null;
+  session_id?: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export interface JobDetail {
   job_id: string;
+  session_id?: string | null;
   goal: string;
   selected_experiment_ids: string[];
   state: JobState;
@@ -146,6 +161,47 @@ export interface ComparisonReport {
   selection_mode: string;
   selected_experiment_ids: string[];
   experiments: ExperimentComparison[];
+}
+
+export interface ExperimentJobHistory {
+  job_id: string;
+  goal: string;
+  status: SessionExperimentStatus | string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SessionExperiment {
+  experiment_id: string;
+  name: string;
+  experiment_type: string;
+  status: SessionExperimentStatus | string;
+  current_job_id?: string | null;
+  job_history: ExperimentJobHistory[];
+}
+
+export interface ReproductionSession {
+  session_id: string;
+  status: SessionStatus | string;
+  origin_intake_id: string;
+  repository_url: string;
+  repository_snapshot_id: string;
+  repository_commit_sha: string;
+  paper_content_hash: string;
+  source_filename: string;
+  goal?: string | null;
+  candidate_experiment_ids: string[];
+  selected_experiment_ids: string[];
+  clarification_questions: string[];
+  required_resources: ResourceRequirement[];
+  planning_status?: string | null;
+  planning_blockers: Array<Record<string, unknown>>;
+  pending_job_id?: string | null;
+  waiting_reason?: string | null;
+  experiments: SessionExperiment[];
+  jobs: JobDetail[];
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ApiErrorBody {

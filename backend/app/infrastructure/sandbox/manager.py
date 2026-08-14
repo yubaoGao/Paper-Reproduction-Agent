@@ -6,11 +6,11 @@ import queue
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from .models import (
     DockerCapabilityReport,
     DockerDeploymentMode,
-    EnvironmentReuseStrategy,
     ResolvedMount,
     ResourceKind,
     RunResources,
@@ -172,6 +172,21 @@ class DockerEngineBackend:
         stdout, stderr = result.output or (b"", b"")
         return result.exit_code, stdout or b"", stderr or b""
 
+    def copy_from_container(self, container_id, source: str, destination) -> None:
+        import io
+        import tarfile
+
+        container = self.client.containers.get(container_id)
+        bits, _stat = container.get_archive(source)
+        stream = io.BytesIO()
+        for chunk in bits:
+            stream.write(chunk)
+        stream.seek(0)
+        dest = Path(destination)
+        dest.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(fileobj=stream, mode="r") as archive:
+            _safe_extract(archive, dest)
+
     def create_volume(self, run_id, purpose, size_bytes):
         if not self.quota_volume_driver:
             raise SandboxRuntimeUnavailableError(
@@ -204,6 +219,20 @@ def _resource_name(prefix: str, run_id: str) -> str:
 
     suffix = hashlib.sha256(run_id.encode()).hexdigest()[:20]
     return f"paperrepro-{prefix}-{suffix}"
+
+
+def _safe_extract(archive, destination: Path) -> None:
+    dest = destination.resolve()
+    for member in archive.getmembers():
+        name = member.name.replace("\\", "/")
+        if name.startswith("/") or ".." in Path(name).parts:
+            raise ValueError("refusing to extract an unsafe archive member")
+        target = (dest / name).resolve()
+        try:
+            target.relative_to(dest)
+        except ValueError as exc:
+            raise ValueError("archive member escapes destination") from exc
+    archive.extractall(dest)
 
 
 class LinuxSandboxManager:
@@ -280,7 +309,7 @@ class LinuxSandboxManager:
     ) -> SandboxExecResult:
         SandboxPathGuard.require_allowed(
             cwd,
-            ("/workspace", "/sandbox-env", "/cache", "/output", "/tmp"),
+            ("/workspace", "/sandbox-env", "/cache", "/output", "/tmp", "/opt/reused-env"),
         )
         started = time.monotonic()
         result_queue = queue.Queue(maxsize=1)
@@ -315,6 +344,15 @@ class LinuxSandboxManager:
             stderr=self._decode(stderr),
             duration_seconds=duration,
         )
+
+    def copy_from_container(self, handle: SandboxHandle, source: str, destination) -> None:
+        SandboxPathGuard.require_allowed(
+            source,
+            ("/sandbox-env", "/cache", "/output"),
+        )
+        dest = Path(destination)
+        dest.mkdir(parents=True, exist_ok=True)
+        self.backend.copy_from_container(handle.container_id, source, dest)
 
     def stop(self, handle: SandboxHandle, timeout_seconds: int = 10) -> None:
         self.backend.stop(handle.container_id, timeout_seconds)
