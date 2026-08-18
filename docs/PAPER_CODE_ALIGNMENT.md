@@ -17,6 +17,8 @@ Task 07 消费经过验证的 `PaperExperimentCatalog` 与 `RepositoryAnalysisCa
 
 `AlignmentCandidateGenerator` 保守规范化原名和 aliases，利用 dataset/model/variant、parameter、config、script/path 和 implementation 关系生成每个 paper item 的有限候选。字面值比较、数值等价、参数冲突与稳定 ID 均由确定性代码完成。
 
+Repository component 与 experiment implementation 同时保留 code-facing name 和有 repository evidence 支持的 semantic aliases。规范化支持显式 acronym 与 alias phrase 首字母的匹配；例如 `LBCL` 可以召回带有 `Label Based Contrastive Learning weight` 语义别名的代码参数。没有字面候选但具有明确 `disable_value` 的 flag/loss coefficient 会以低分 bounded fallback 进入 semantic review，而不会被确定性阶段直接认定为已对齐。
+
 Confidence 是透明的 heuristic alignment confidence，不是统计概率。当前信号包括 canonical/alias exact、token overlap、dataset/model relation、parameter overlap、双源证据和值一致；确定性冲突的高 confidence 表示“冲突判断可靠”，并不表示任一来源更正确。
 
 `ReproductionSpecification` 仅提升相关 target 的上下文优先级，不会删除 shared training settings 或其它全局 mapping。

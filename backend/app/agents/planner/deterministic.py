@@ -1,8 +1,11 @@
 """Deterministic, auditable reproduction-plan construction."""
 from __future__ import annotations
 import hashlib
+import json
 import re
+from decimal import Decimal,InvalidOperation
 from backend.app.domain import *
+from backend.app.agents.alignment.normalization import canonical_name
 from .actions import EvaluationActionPlanner
 
 def _norm(value):
@@ -10,6 +13,59 @@ def _norm(value):
 
 def _id(prefix,*parts):
     return f"{prefix}:"+hashlib.sha256("\x1f".join(str(x) for x in parts).encode()).hexdigest()[:16]
+
+def _same_value(left,right):
+    if left==right:return True
+    try:return Decimal(str(left))==Decimal(str(right))
+    except (InvalidOperation,ValueError):return str(left).strip().casefold()==str(right).strip().casefold()
+
+def _argument_value(value):
+    if isinstance(value,bool):return "true" if value else "false"
+    if isinstance(value,(dict,list)):return json.dumps(value,ensure_ascii=False,separators=(",",":"))
+    return str(value)
+
+def _apply_cli_argument(arguments,argument,value):
+    values=list(arguments);name=argument.name;positions=[i for i,item in enumerate(values) if item==name]
+    if argument.action in {"store_true","store_false"}:
+        enabled=value==(argument.action=="store_true")
+        values=[item for item in values if item!=name]
+        if enabled:values.append(name)
+        return tuple(values)
+    rendered=_argument_value(value)
+    if positions:
+        index=positions[0]
+        if index+1<len(values) and not re.match(r"^-{1,2}[A-Za-z_]",values[index+1]):values[index+1]=rendered
+        elif index+1<len(values):values.insert(index+1,rendered)
+        else:values.append(rendered)
+    else:values.extend((name,rendered))
+    return tuple(values)
+
+def materialize_parameters(entrypoint,arguments,values,selected_configs,configs,required=()):
+    result=tuple(arguments);bindings={};missing=[]
+    cli_by_name={canonical_name(item.name.lstrip("-")):item for item in entrypoint.arguments}
+    selected=[configs[x] for x in selected_configs if x in configs]
+    requirements={key:details for key,details in required}
+    for key,value in values.items():
+        details=requirements.get(key,{})
+        application=details.get("application")
+        argument=None
+        if application=="cli_argument":
+            requested=str(details.get("argument_name") or "")
+            argument=next((item for item in entrypoint.arguments if item.name==requested),None)
+            expected_entry=details.get("entrypoint_id")
+            if expected_entry and expected_entry!=entrypoint.entrypoint_id:argument=None
+        if argument is None and application in {None,"cli_argument"}:argument=cli_by_name.get(canonical_name(key))
+        if argument is not None:
+            result=_apply_cli_argument(result,argument,value)
+            bindings[key]=AppliedParameter(name=key,value=value,application=ParameterApplication.CLI_ARGUMENT,reference=argument.name)
+            continue
+        config_id=str(details.get("config_id") or "") if application=="config_value" else ""
+        matches=[item for item in selected if (config_id and item.config_id==config_id) or (not config_id and canonical_name(item.key_path.rsplit(".",1)[-1])==canonical_name(key))]
+        if len(matches)==1 and _same_value(matches[0].value,value):
+            bindings[key]=AppliedParameter(name=key,value=value,application=ParameterApplication.CONFIG_VALUE,reference=matches[0].config_id)
+            continue
+        if key in requirements:missing.append(key)
+    return result,tuple(bindings.values()),tuple(missing)
 
 class DeterministicPlanBuilder:
     def __init__(self):self.action_planner=EvaluationActionPlanner()
@@ -48,7 +104,7 @@ class DeterministicPlanBuilder:
                 blockers.append(self._block("ambiguous_config",paper_exp.experiment_id,"Multiple aligned configuration candidates require semantic selection.",record.alignment_id)); continue
             if any(x not in configs for x in selected_configs):
                 blockers.append(self._block("invalid_config_reference",paper_exp.experiment_id,"Selected configuration is absent from repository analysis.",record.alignment_id)); continue
-            values={}; exp_decisions=[]; failed=False
+            values={}; exp_decisions=[]; failed=False; ablation_requirements={}
             mappings=[params[x] for x in record.parameter_mapping_ids if x in params]
             mappings += [x for x in alignment.parameter_mappings if x.paper_experiment_id is None and x.alignment_id not in record.parameter_mapping_ids]
             for mapping in mappings:
@@ -73,10 +129,11 @@ class DeterministicPlanBuilder:
                         component=components.get(component_id)
                         if component is None:
                             blockers.append(self._block("invalid_ablation_reference",paper_exp.experiment_id,"Ablation mapping references an unknown mechanism.",mapping.alignment_id)); failed=True; continue
-                        value=component.details.get("value",paper_exp.conditions.get(component.name))
+                        value=component.details.get("disable_value",component.details.get("value",paper_exp.conditions.get(component.name)))
                         if value is None:
                             blockers.append(self._block("unknown_ablation_value",paper_exp.experiment_id,f"Ablation mechanism {component.name!r} has no explicit value.",mapping.alignment_id)); failed=True; continue
                         values[component.name]=value
+                        ablation_requirements[component.name]=component.details
                         decision=PlannerDecision(decision_id=_id("decision",paper_exp.experiment_id,"ablation",component.name),experiment_id=paper_exp.experiment_id,semantic_key=f"ablation:{component.name}",selected_value=value,source=DecisionSource.ALIGNMENT,policy=policy,reason="Ablation modification is backed by the aligned repository mechanism.",paper_evidence=mapping.paper_evidence,repository_evidence=component.evidence,alignment_reference=mapping.alignment_id,confidence=mapping.confidence)
                         decisions.append(decision); exp_decisions.append(decision.decision_id)
             if failed: continue
@@ -99,8 +156,11 @@ class DeterministicPlanBuilder:
             commands=[x for x in repo.commands if x.command_id in record.command_ids and (x.entrypoint_path is None or x.entrypoint_path==ep.path)]
             command_ref=commands[0] if len(commands)==1 else None
             arguments=(ep.path,)+(() if command_ref is None else command_ref.arguments)
+            arguments,applied_parameters,missing_ablation_parameters=materialize_parameters(ep,arguments,values,selected_configs,configs,tuple(ablation_requirements.items()))
+            if missing_ablation_parameters:
+                blockers.append(self._block("unmaterialized_ablation",paper_exp.experiment_id,"Ablation values cannot be applied to the selected command or an already-selected configuration: "+", ".join(missing_ablation_parameters),record.alignment_id));continue
             program=ep.interpreter or ("python" if ep.path.casefold().endswith(".py") else ep.path)
-            resolved=ExecutableCommand(program=program,arguments=arguments,entrypoint_id=ep.entrypoint_id,config_ids=selected_configs,command_reference_id=None if command_ref is None else command_ref.command_id,environment_variable_references=() if command_ref is None else command_ref.environment_variables)
+            resolved=ExecutableCommand(program=program,arguments=arguments,entrypoint_id=ep.entrypoint_id,config_ids=selected_configs,command_reference_id=None if command_ref is None else command_ref.command_id,environment_variable_references=() if command_ref is None else command_ref.environment_variables,applied_parameters=applied_parameters)
             evaluation_policy=overrides.evaluation_policies.get(paper_exp.experiment_id)
             evaluation_alignment=evaluation_alignments.get(paper_exp.experiment_id)
             if evaluation_alignment is not None and evaluation_alignment.status is EvaluationPolicyAlignmentStatus.CONFLICT:

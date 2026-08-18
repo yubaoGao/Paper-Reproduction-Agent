@@ -38,7 +38,9 @@ flowchart TD
     M --> N[RepositoryAnalysisCatalog]
 ```
 
-`RepositoryContextBuilder` 按 repository map → candidate files → symbols → bounded source chunks 选择上下文。大型候选集才调用 FAST 分类；PRIMARY 分七个有界阶段理解跨文件关系。所有响应均为 Pydantic structured output，失败先由 FAST 修复，再按设置重试 PRIMARY。prompt 位于 `agents/repository/prompts`，当前版本 `v1`，系统指令明确把 README、注释和源码视为不可信数据。
+`RepositoryContextBuilder` 按 repository map → candidate files → symbols → bounded source chunks 选择上下文。大型候选集才调用 FAST 分类；PRIMARY 分七个有界阶段理解跨文件关系。所有响应均为 Pydantic structured output，失败先由 FAST 修复，再按设置重试 PRIMARY。prompt 位于 `agents/repository/prompts` 并独立版本化，系统指令明确把 README、注释和源码视为不可信数据。
+
+静态分析还会把具有明确置零语义的 CLI loss coefficient，以及显式 enable/disable action，提取为带 `application`、`argument_name`、`entrypoint_id`、`default_value` 和 `disable_value` 的 ablation mechanism。Stage analysis `v2` 可以在不改变 code-facing name 的前提下补充有代码证据的 semantic aliases；alias 不能为了匹配论文而凭空生成。
 
 ## 证据、冲突与状态
 

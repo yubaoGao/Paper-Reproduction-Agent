@@ -36,9 +36,12 @@ class ReproductionPlanValidator:
             if paper_exp is None: raise PlanningValidationError("planned experiment lacks a paper experiment reference")
             if paper_exp.dataset and exp.dataset_requirement is None: raise PlanningValidationError("dataset requirement is missing")
             semantic_keys={decision_records[x].semantic_key for x in exp.provenance_decision_ids}
+            applied={item.name:item for item in cmd.applied_parameters}
             for key in exp.hyperparameters:
                 if f"parameter:{key}" not in semantic_keys and f"ablation:{key}" not in semantic_keys: raise PlanningValidationError("hyperparameter lacks a planning decision")
-            if exp.task_type.value=="ablation" and not any(x.startswith("ablation:") for x in semantic_keys): raise PlanningValidationError("ablation implementation lacks provenance")
+            ablation_keys={x.split(":",1)[1] for x in semantic_keys if x.startswith("ablation:")}
+            if exp.task_type.value=="ablation" and not ablation_keys: raise PlanningValidationError("ablation implementation lacks provenance")
+            if any(key not in applied or applied[key].value!=exp.hyperparameters.get(key) for key in ablation_keys):raise PlanningValidationError("ablation value is not materialized in the executable command")
             if exp.metadata.get("paper_experiment_id") in production_ids:
                 if exp.evaluation_policy is None or not exp.evaluation_policy.is_resolved or exp.action_plan is None:raise PlanningValidationError("selected production experiment lacks resolved final-result action plan")
         accounted={x.metadata.get("paper_experiment_id") for x in plan.experiments}|{x.paper_experiment_id for x in plan.blockers}|{x.paper_experiment_id for x in plan.unresolved_items}

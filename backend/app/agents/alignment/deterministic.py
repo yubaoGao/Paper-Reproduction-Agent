@@ -22,7 +22,7 @@ class DeterministicAlignment:
 
 class AlignmentConfidenceScorer:
     """Scores evidence signals, not statistical probabilities."""
-    weights={"canonical_or_alias_exact":.7,"strong_token_overlap":.45,"partial_token_overlap":.25,"experiment_relation":.4,"dataset_relation":.18,"model_relation":.18,"parameter_overlap":.09,"paired_evidence":.15,"value_match":.2}
+    weights={"canonical_or_alias_exact":.7,"acronym_alias_match":.45,"strong_token_overlap":.45,"partial_token_overlap":.25,"experiment_relation":.4,"dataset_relation":.18,"model_relation":.18,"parameter_overlap":.09,"paired_evidence":.15,"value_match":.2}
     def score(self,signals,paper_evidence=(),repository_evidence=()):
         value=sum(self.weights.get(x,0) for x in set(signals))
         if paper_evidence and repository_evidence:value+=self.weights["paired_evidence"]
@@ -124,7 +124,7 @@ class DeterministicAlignmentBuilder:
         # below only to score repository candidates.
         for claim in claims:groups.setdefault(claim.metric_name,[]).append(claim)
         for key,items in groups.items():
-            matches=[x for x in repository.metrics if name_strength(normalize_entity(items[0].metric_name),normalize_entity(x.name))[0]>=.45];status=_status(1 if len(matches)==1 else .5,len(matches));repo_agg=next((str(x.details.get("aggregation")) for x in matches if x.details.get("aggregation") is not None),None);paper_agg=next((x.condition for x in items if x.condition and any(y in x.condition.casefold() for y in ("macro","micro","weighted"))),None);paper_split=next((x.split for x in items if x.split),None);repo_split=next((str(x.details.get("split")) for x in matches if x.details.get("split") is not None),None);conflict_id=None
+            matches=[x for x in repository.metrics if name_strength(normalize_entity(items[0].metric_name),normalize_entity(x.name,x.aliases))[0]>=.45];status=_status(1 if len(matches)==1 else .5,len(matches));repo_agg=next((str(x.details.get("aggregation")) for x in matches if x.details.get("aggregation") is not None),None);paper_agg=next((x.condition for x in items if x.condition and any(y in x.condition.casefold() for y in ("macro","micro","weighted"))),None);paper_split=next((x.split for x in items if x.split),None);repo_split=next((str(x.details.get("split")) for x in matches if x.details.get("split") is not None),None);conflict_id=None
             mismatch=(paper_agg and repo_agg and normalize_entity(paper_agg).canonical_name!=normalize_entity(repo_agg).canonical_name) or (paper_split and repo_split and normalize_entity(paper_split).canonical_name!=normalize_entity(repo_split).canonical_name)
             if mismatch:
                 status=AlignmentStatus.CONFLICTED;conflict_id=stable_id("conflict","metric",key);paper_definition={"aggregation":paper_agg,"split":paper_split};repo_definition={"aggregation":repo_agg,"split":repo_split};conflicts.append(AlignmentConflict(conflict_id=conflict_id,semantic_key=f"metric:{key}:definition",conflict_type=AlignmentConflictType.METRIC_DEFINITION_MISMATCH,candidates=(AlignmentConflictCandidate(source=AlignmentItemSource.PAPER,value=paper_definition,evidence=_evidence(items)),AlignmentConflictCandidate(source=AlignmentItemSource.REPOSITORY,value=repo_definition,evidence=_evidence(matches))),reasoning="metric split or aggregation differs"))

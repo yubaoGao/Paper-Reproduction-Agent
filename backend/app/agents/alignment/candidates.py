@@ -13,24 +13,24 @@ class AlignmentCandidateGenerator:
         for entity in paper.datasets:
             left=normalize_entity(entity.canonical_name,entity.aliases)
             for item in repository.datasets:
-                score,signals=name_strength(left,normalize_entity(item.name))
+                score,signals=name_strength(left,normalize_entity(item.name,item.aliases))
                 if score:output.append(self._candidate("dataset",entity.canonical_name,(item.component_id,),score,signals,entity.evidence,item.evidence))
         for entity in paper.model_variants:
             left=normalize_entity(entity.canonical_name,entity.aliases)
             for item in repository.models:
-                score,signals=name_strength(left,normalize_entity(item.name))
+                score,signals=name_strength(left,normalize_entity(item.name,item.aliases))
                 if score:output.append(self._candidate("model",entity.canonical_name,(item.component_id,),score,signals,entity.evidence,item.evidence))
         for experiment in paper.experiments:
             candidates=[]
             for implementation in repository.experiment_implementations:
                 score=0.0;signals=[]
-                value,found=name_strength(normalize_entity(experiment.name,(experiment.variant,) if experiment.variant else ()),normalize_entity(implementation.name));score+=value*.45;signals.extend(found)
-                if experiment.dataset and set(implementation.dataset_ids)&{x.component_id for x in repository.datasets if name_strength(normalize_entity(experiment.dataset),normalize_entity(x.name))[0]>=.72}:score+=.25;signals.append("dataset_relation")
-                if experiment.model and set(implementation.model_ids)&{x.component_id for x in repository.models if name_strength(normalize_entity(experiment.model),normalize_entity(x.name))[0]>=.72}:score+=.2;signals.append("model_relation")
+                value,found=name_strength(normalize_entity(experiment.name,(experiment.variant,) if experiment.variant else ()),normalize_entity(implementation.name,implementation.aliases));score+=value*.45;signals.extend(found)
+                if experiment.dataset and set(implementation.dataset_ids)&{x.component_id for x in repository.datasets if name_strength(normalize_entity(experiment.dataset),normalize_entity(x.name,x.aliases))[0]>=.72}:score+=.25;signals.append("dataset_relation")
+                if experiment.model and set(implementation.model_ids)&{x.component_id for x in repository.models if name_strength(normalize_entity(experiment.model),normalize_entity(x.name,x.aliases))[0]>=.72}:score+=.2;signals.append("model_relation")
                 paper_params={normalize_entity(x.name).canonical_name for x in experiment.parameters};repo_params={normalize_entity(x).canonical_name for x in implementation.parameter_keys}
                 if paper_params&repo_params:score+=.1;signals.append("parameter_overlap")
                 if score>0:candidates.append(self._candidate("experiment",experiment.experiment_id,(implementation.implementation_id,),min(score,1),tuple(signals),experiment.evidence,implementation.evidence))
-                relation_score=name_strength(normalize_entity(experiment.name),normalize_entity(implementation.name))[0]
+                relation_score=name_strength(normalize_entity(experiment.name),normalize_entity(implementation.name,implementation.aliases))[0]
                 if relation_score>=.45:
                     if experiment.dataset:
                         entity=next((x for x in paper.datasets if normalize_entity(experiment.dataset).canonical_name in normalize_entity(x.canonical_name,x.aliases).keys),None)
@@ -44,9 +44,11 @@ class AlignmentCandidateGenerator:
         for experiment in paper.experiments:
             if experiment.experiment_type is ExperimentType.ABLATION:
                 for item in repository.ablation_mechanisms:
-                    score,signals=name_strength(normalize_entity(experiment.variant or experiment.name),normalize_entity(item.name))
-                    details=" ".join(str(x) for x in item.details.values()).casefold();paper_tokens=set(__import__("re").findall(r"[a-z0-9]+",(experiment.variant or experiment.name).casefold()));repo_tokens=set(__import__("re").findall(r"[a-z0-9]+",item.name.casefold().replace("_"," ")))
-                    if score or paper_tokens&repo_tokens and any(x in details for x in ("false","0","disable")):output.append(self._candidate("ablation",experiment.experiment_id,(item.component_id,),max(score,.55),(*signals,"repository_ablation_mechanism"),experiment.evidence,item.evidence))
+                    score,signals=name_strength(normalize_entity(experiment.variant or experiment.name),normalize_entity(item.name,item.aliases))
+                    paper_tokens=set(__import__("re").findall(r"[a-z0-9]+",(experiment.variant or experiment.name).casefold()));repo_tokens=set(__import__("re").findall(r"[a-z0-9]+"," ".join((item.name,*item.aliases)).casefold().replace("_"," ")))
+                    detail_value=item.details.get("value");explicit_disable=item.details.get("disable_value") is not None or any(detail_value==x for x in (False,0,"disable","disabled"))
+                    if score or paper_tokens&repo_tokens and explicit_disable:output.append(self._candidate("ablation",experiment.experiment_id,(item.component_id,),max(score,.55),(*signals,"repository_ablation_mechanism"),experiment.evidence,item.evidence))
+                    elif explicit_disable:output.append(self._candidate("ablation",experiment.experiment_id,(item.component_id,),.2,("bounded_ablation_fallback",),experiment.evidence,item.evidence))
         paper_parameters=[]
         for experiment in paper.experiments:paper_parameters.extend((experiment.experiment_id,x) for x in experiment.parameters)
         paper_parameters.extend(("global",x) for x in (*paper.training_parameters,*paper.evaluation_parameters))

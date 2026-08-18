@@ -22,6 +22,8 @@ Production selected-paper-experiment path 还必须拥有 resolved `EvaluationPo
 
 预期结果仍来自 `PaperClaim`，仅转换为比较用的 `MetricExpectation`，不会伪装成实际运行 `Metric`。“All Ablations” 会按论文消融逐项展开，每项必须有 Task 07 的仓库机制证据；布尔 `false` 与数值 `0` 都会被准确保留。显式实验依赖经过引用检查和拓扑排序，环会阻塞计划。
 
+消融值还必须 materialize 到最终 `ExecutableCommand`：CLI mechanism 会确定性追加或替换 argument-vector 中的参数，已选 config 只有在其中的现有值与目标值一致时才算已应用。每个应用形成 `AppliedParameter` provenance。无法映射到所选 entrypoint/config 的消融值产生 `unmaterialized_ablation` blocker，禁止出现 plan 记录为 `0` 而实际命令仍使用默认 `1` 的静默偏差。
+
 ## Agent、模型路由与验证
 
 确定性规则负责目标、普通策略、参数、单入口、配置、数据集、命令、环境、资源、状态和 provenance。只有多个有效入口、复杂 config 等真实语义歧义才交给 DeepSeek PRIMARY；输出 schema 只能选择目录中已有 ID，不能生成命令或事实。无效结果通过有界的 Qwen FAST/DeepSeek 修复，Qwen FAST 负责最终 plan review。全部 prompt 从 `v1` 文本文件加载并随包发布。

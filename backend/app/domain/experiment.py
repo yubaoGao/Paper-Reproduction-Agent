@@ -264,13 +264,17 @@ class MetricExpectation(DomainModel):
         return value
 
 class DatasetAvailability(str,Enum): AVAILABLE="available"; BINDING_REQUIRED="binding_required"; UNKNOWN="unknown"
+class ParameterApplication(str,Enum): CLI_ARGUMENT="cli_argument"; CONFIG_VALUE="config_value"; ENVIRONMENT_VARIABLE="environment_variable"
+class AppliedParameter(DomainModel):
+    name:NonEmptyStr; value:JsonValue; application:ParameterApplication; reference:NonEmptyStr
 class ExecutableCommand(DomainModel):
     """Argument-vector command declaration; never a shell expression."""
-    program:NonEmptyStr;arguments:tuple[NonEmptyStr,...]=();working_directory:NonEmptyStr=".";environment_variable_references:tuple[NonEmptyStr,...]=();entrypoint_id:NonEmptyStr|None=None;config_ids:tuple[NonEmptyStr,...]=();command_reference_id:NonEmptyStr|None=None
+    program:NonEmptyStr;arguments:tuple[NonEmptyStr,...]=();working_directory:NonEmptyStr=".";environment_variable_references:tuple[NonEmptyStr,...]=();entrypoint_id:NonEmptyStr|None=None;config_ids:tuple[NonEmptyStr,...]=();command_reference_id:NonEmptyStr|None=None;applied_parameters:tuple[AppliedParameter,...]=()
     @model_validator(mode="after")
     def reject_shell_syntax(self):
         unsafe={"&&","||",";","|",">","<"}
         if self.program in unsafe or any(x in unsafe or "\n" in x or "\r" in x for x in self.arguments):raise ValueError("structured command cannot contain shell control operators")
+        if len({x.name for x in self.applied_parameters})!=len(self.applied_parameters):raise ValueError("applied command parameter names must be unique")
         return self
 class DatasetRequirement(DomainModel):
     name:NonEmptyStr;repository_dataset_id:NonEmptyStr|None=None;binding:NonEmptyStr|None=None;split:NonEmptyStr|None=None;preprocessing_assumptions:tuple[NonEmptyStr,...]=();loader_references:tuple[NonEmptyStr,...]=();paper_evidence:tuple[SerializeAsAny[DomainModel],...]=();repository_evidence:tuple[SerializeAsAny[DomainModel],...]=();availability:DatasetAvailability

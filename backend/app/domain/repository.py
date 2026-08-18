@@ -57,16 +57,16 @@ class CodeSymbol(DomainModel):
         if self.end_line<self.start_line: raise ValueError("symbol line range is inverted")
         return self
 class CodeIndex(DomainModel): symbols:tuple[CodeSymbol,...]=(); imports:dict[NonEmptyStr,tuple[NonEmptyStr,...]]=Field(default_factory=dict); parse_warnings:tuple[NonEmptyStr,...]=()
-class CliArgument(DomainModel): name:NonEmptyStr; value_type:NonEmptyStr|None=None; default:JsonValue|None=None; required:bool=False; choices:tuple[JsonValue,...]=(); source:NonEmptyStr
+class CliArgument(DomainModel): name:NonEmptyStr; value_type:NonEmptyStr|None=None; default:JsonValue|None=None; required:bool=False; choices:tuple[JsonValue,...]=(); action:NonEmptyStr|None=None; source:NonEmptyStr
 class EntrypointCandidate(DomainModel):
     entrypoint_id:NonEmptyStr; entrypoint_type:EntrypointType; path:NonEmptyStr; symbol_id:NonEmptyStr|None=None; interpreter:NonEmptyStr|None=None
     arguments:tuple[CliArgument,...]=(); config_paths:tuple[NonEmptyStr,...]=(); confidence:float=Field(ge=0,le=1); evidence:tuple[EvidenceReference,...]
 class RepositoryConfigRecord(DomainModel): config_id:NonEmptyStr; path:NonEmptyStr; key_path:NonEmptyStr; value:JsonValue; source:NonEmptyStr; references:tuple[NonEmptyStr,...]=(); dynamic_override:bool=False; evidence:tuple[EvidenceReference,...]
 class DependencyRecord(DomainModel): dependency_id:NonEmptyStr; name:NonEmptyStr; version_spec:NonEmptyStr|None=None; ecosystem:NonEmptyStr; optional:bool=False; source_path:NonEmptyStr; evidence:tuple[EvidenceReference,...]
 class RepositoryCommand(DomainModel): command_id:NonEmptyStr; source_path:NonEmptyStr; command:NonEmptyStr; entrypoint_path:NonEmptyStr|None=None; arguments:tuple[NonEmptyStr,...]=(); environment_variables:tuple[NonEmptyStr,...]=(); evidence:tuple[EvidenceReference,...]
-class RepositoryComponentRecord(DomainModel): component_id:NonEmptyStr; name:NonEmptyStr; kind:NonEmptyStr; paths:tuple[NonEmptyStr,...]; symbol_ids:tuple[NonEmptyStr,...]=(); details:dict[NonEmptyStr,JsonValue]=Field(default_factory=dict); evidence:tuple[EvidenceReference,...]
+class RepositoryComponentRecord(DomainModel): component_id:NonEmptyStr; name:NonEmptyStr; aliases:tuple[NonEmptyStr,...]=(); kind:NonEmptyStr; paths:tuple[NonEmptyStr,...]; symbol_ids:tuple[NonEmptyStr,...]=(); details:dict[NonEmptyStr,JsonValue]=Field(default_factory=dict); evidence:tuple[EvidenceReference,...]
 class RepositoryExperimentImplementation(DomainModel):
-    implementation_id:NonEmptyStr; name:NonEmptyStr; entrypoint_ids:tuple[NonEmptyStr,...]=Field(min_length=1); config_ids:tuple[NonEmptyStr,...]=(); dataset_ids:tuple[NonEmptyStr,...]=(); model_ids:tuple[NonEmptyStr,...]=(); parameter_keys:tuple[NonEmptyStr,...]=(); command_ids:tuple[NonEmptyStr,...]=(); evidence:tuple[EvidenceReference,...]=Field(min_length=1)
+    implementation_id:NonEmptyStr; name:NonEmptyStr; aliases:tuple[NonEmptyStr,...]=(); entrypoint_ids:tuple[NonEmptyStr,...]=Field(min_length=1); config_ids:tuple[NonEmptyStr,...]=(); dataset_ids:tuple[NonEmptyStr,...]=(); model_ids:tuple[NonEmptyStr,...]=(); parameter_keys:tuple[NonEmptyStr,...]=(); command_ids:tuple[NonEmptyStr,...]=(); evidence:tuple[EvidenceReference,...]=Field(min_length=1)
 class RepositoryEvaluationPolicyRecord(DomainModel):
     policy_id:NonEmptyStr
     policy:EvaluationPolicy

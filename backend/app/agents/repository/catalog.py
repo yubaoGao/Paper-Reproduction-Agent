@@ -13,7 +13,15 @@ def _unique(records,field):
 class RepositoryCatalogMerger:
     def merge(self,snapshot,static,stages,missing=(),warnings=()):
         semantic_components=[x for _,stage in stages for x in stage.components]
-        def components(kind,base):return _unique((*base,*(x for x in semantic_components if x.kind.startswith(kind))),"component_id")
+        def components(kind,base):
+            result={x.component_id:x for x in base}
+            for semantic in (x for x in semantic_components if x.kind.startswith(kind)):
+                current=result.get(semantic.component_id)
+                if current is None:
+                    result[semantic.component_id]=semantic;continue
+                aliases=tuple(x for x in dict.fromkeys((*current.aliases,semantic.name,*semantic.aliases)) if x.casefold()!=current.name.casefold())
+                result[semantic.component_id]=current.model_copy(update={"aliases":aliases,"paths":tuple(dict.fromkeys((*current.paths,*semantic.paths))),"symbol_ids":tuple(dict.fromkeys((*current.symbol_ids,*semantic.symbol_ids))),"details":{**current.details,**semantic.details},"evidence":tuple(dict.fromkeys((*current.evidence,*semantic.evidence)))})
+            return tuple(result.values())
         implementations=_unique((x for _,stage in stages for x in stage.implementations),"implementation_id")
         evaluation_policies=_unique((x for _,stage in stages for x in stage.evaluation_policies),"policy_id")
         unknowns=tuple(x for _,stage in stages for x in stage.facts)
@@ -24,7 +32,7 @@ class RepositoryCatalogMerger:
             for record in group:evidence.extend(getattr(record,"evidence",()))
         for _,stage in stages:evidence.extend(stage.evidence)
         status=RepositoryAnalysisStatus.PARTIAL if missing else RepositoryAnalysisStatus.COMPLETE
-        return RepositoryAnalysisCatalog(catalog_id=f"repository-catalog:{snapshot.snapshot_id}",repository=snapshot.repository,snapshot_id=snapshot.snapshot_id,resolved_commit_sha=snapshot.resolved_commit_sha,languages=snapshot.languages,project_structure=tuple(x.path for x in snapshot.files),code_index=static.code_index,documentation=static.documentation,environment_definitions=static.environment_definitions,dependencies=static.dependencies,entrypoints=static.entrypoints,configurations=static.configurations,datasets=components("dataset",static.datasets),models=components("model",static.models),experiment_implementations=implementations,evaluation_policies=evaluation_policies,ablation_mechanisms=components("ablation",static.ablations),metrics=components("metric",static.metrics),checkpoints=components("checkpoint",static.checkpoints),artifact_paths=components("artifact",static.artifacts),commands=static.commands,evidence=tuple(dict.fromkeys(evidence)),conflicts=conflicts,unknowns=unknowns,analysis_status=status,analysis_metadata=RepositoryAnalysisMetadata(stages_completed=tuple(stage_name for stage_name,_ in stages),missing_components=tuple(dict.fromkeys(missing)),warnings=tuple(dict.fromkeys((*static.warnings,*warnings))),prompt_versions={"context_classification":"v1","stage_analysis":"v1","repair":"v1","catalog_review":"v1"}))
+        return RepositoryAnalysisCatalog(catalog_id=f"repository-catalog:{snapshot.snapshot_id}",repository=snapshot.repository,snapshot_id=snapshot.snapshot_id,resolved_commit_sha=snapshot.resolved_commit_sha,languages=snapshot.languages,project_structure=tuple(x.path for x in snapshot.files),code_index=static.code_index,documentation=static.documentation,environment_definitions=static.environment_definitions,dependencies=static.dependencies,entrypoints=static.entrypoints,configurations=static.configurations,datasets=components("dataset",static.datasets),models=components("model",static.models),experiment_implementations=implementations,evaluation_policies=evaluation_policies,ablation_mechanisms=components("ablation",static.ablations),metrics=components("metric",static.metrics),checkpoints=components("checkpoint",static.checkpoints),artifact_paths=components("artifact",static.artifacts),commands=static.commands,evidence=tuple(dict.fromkeys(evidence)),conflicts=conflicts,unknowns=unknowns,analysis_status=status,analysis_metadata=RepositoryAnalysisMetadata(stages_completed=tuple(stage_name for stage_name,_ in stages),missing_components=tuple(dict.fromkeys(missing)),warnings=tuple(dict.fromkeys((*static.warnings,*warnings))),prompt_versions={"context_classification":"v1","stage_analysis":"v2","repair":"v1","catalog_review":"v1"}))
 
 class RepositoryCatalogValidator:
     def __init__(self,evidence_validator=None):self.evidence=evidence_validator or RepositoryEvidenceValidator()

@@ -49,12 +49,12 @@ class PythonAstAnalyzer:
                 for decorator in getattr(node,"decorator_list",()):
                     if isinstance(decorator,ast.Call) and ast.unparse(decorator.func).endswith(("click.option",".option")) and decorator.args:
                         argument=self._literal(decorator.args[0]);kwargs={x.arg:self._literal(x.value) for x in decorator.keywords if x.arg}
-                        cli.append(CliArgument(name=str(argument),value_type=str(kwargs.get("type")) if kwargs.get("type") else None,default=kwargs.get("default"),required=bool(kwargs.get("required",False)),source=line_locator(path,decorator.lineno,getattr(decorator,"end_lineno",decorator.lineno))))
+                        cli.append(CliArgument(name=str(argument),value_type=str(kwargs.get("type")) if kwargs.get("type") else None,default=kwargs.get("default"),required=bool(kwargs.get("required",False)),action="store_true" if kwargs.get("is_flag") is True else None,source=line_locator(path,decorator.lineno,getattr(decorator,"end_lineno",decorator.lineno))))
                 defaults=getattr(getattr(node,"args",None),"defaults",())
                 arguments=getattr(getattr(node,"args",None),"args",())
                 for argument,default in (zip(arguments[-len(defaults):],defaults) if defaults else ()):
                     if isinstance(default,ast.Call) and ast.unparse(default.func).endswith(("typer.Option","typer.Argument")):
-                        kwargs={x.arg:self._literal(x.value) for x in default.keywords if x.arg};cli.append(CliArgument(name=f"--{argument.arg.replace('_','-')}",default=kwargs.get("default"),required=False,source=line_locator(path,default.lineno,getattr(default,"end_lineno",default.lineno))))
+                        kwargs={x.arg:self._literal(x.value) for x in default.keywords if x.arg};cli.append(CliArgument(name=f"--{argument.arg.replace('_','-')}",default=kwargs.get("default"),required=False,action="store_true" if kwargs.get("is_flag") is True else None,source=line_locator(path,default.lineno,getattr(default,"end_lineno",default.lineno))))
                 self.stack.append(name); self.generic_visit(node); self.stack.pop()
             def visit_ClassDef(self,node): self._symbol(node,SymbolKind.CLASS)
             def visit_FunctionDef(self,node): self._symbol(node,SymbolKind.METHOD if self.stack else SymbolKind.FUNCTION)
@@ -64,7 +64,7 @@ class PythonAstAnalyzer:
                 if name.endswith(".add_argument") and node.args:
                     arg=self._literal(node.args[0]); kwargs={x.arg:self._literal(x.value) for x in node.keywords if x.arg}
                     choices=kwargs.get("choices") if isinstance(kwargs.get("choices"),list) else []
-                    cli.append(CliArgument(name=str(arg),value_type=str(kwargs.get("type")) if kwargs.get("type") is not None else None,default=kwargs.get("default"),required=bool(kwargs.get("required",False)),choices=tuple(choices),source=line_locator(path,node.lineno,getattr(node,"end_lineno",node.lineno))))
+                    cli.append(CliArgument(name=str(arg),value_type=str(kwargs.get("type")) if kwargs.get("type") is not None else None,default=kwargs.get("default"),required=bool(kwargs.get("required",False)),choices=tuple(choices),action=str(kwargs.get("action")) if kwargs.get("action") is not None else None,source=line_locator(path,node.lineno,getattr(node,"end_lineno",node.lineno))))
                 self.generic_visit(node)
             @staticmethod
             def _literal(node):
@@ -254,7 +254,7 @@ class RepositoryStaticAnalyzer:
         configurations,dependencies,problems=self.configs.analyze(snapshot,reader);warnings.extend(problems)
         commands,shell_entries,docs,doc_conflicts=self._commands(snapshot,reader);entrypoints.extend(shell_entries)
         metadata_entries=self._metadata_entrypoints(snapshot,reader);entrypoints.extend(metadata_entries)
-        datasets,models,ablations,metrics,checkpoints,artifacts=self._components(snapshot,reader,symbols,configurations,metric_names=metric_names)
+        datasets,models,ablations,metrics,checkpoints,artifacts=self._components(snapshot,reader,symbols,configurations,entrypoints,metric_names=metric_names)
         conflicts=(*doc_conflicts,*self._dependency_conflicts(dependencies),*self._entrypoint_conflicts(snapshot,entrypoints),*self._config_cli_conflicts(snapshot,configurations,entrypoints),*self._dataset_name_conflicts(configurations))
         environments=tuple(RepositoryComponentRecord(component_id=f"env:{path}",name=Path(path).name,kind="environment",paths=(path,),evidence=(repo_evidence(snapshot,f"file:{path}"),)) for path in snapshot.manifests)
         return StaticRepositoryAnalysis(CodeIndex(symbols=tuple(symbols),imports=imports,parse_warnings=tuple(warnings)),configurations,dependencies,tuple(entrypoints),commands,datasets,models,ablations,metrics,checkpoints,artifacts,tuple(conflicts),docs,environments,tuple(warnings))
@@ -307,7 +307,7 @@ class RepositoryStaticAnalyzer:
                             command,_,target=str(item).partition("=");module,_,symbol=target.strip().partition(":");candidate=module.replace(".","/")+".py"
                             if candidate in known:entries.append(EntrypointCandidate(entrypoint_id=f"entry:{path}:{command.strip()}",entrypoint_type=PythonAstAnalyzer._entry_type(candidate,command),path=candidate,symbol_id=f"{candidate}::{symbol}" if symbol else None,interpreter="python",confidence=.9,evidence=(repo_evidence(snapshot,line_locator(path,node.lineno,getattr(node,"end_lineno",node.lineno)),str(item)),)))
         return tuple(entries)
-    def _components(self,snapshot,reader,symbols,configs,*,metric_names=()):
+    def _components(self,snapshot,reader,symbols,configs,entrypoints=(),*,metric_names=()):
         datasets=[];models=[];ablations=[];metrics=[];checkpoints=[];artifacts=[]
         metric_names=tuple(dict.fromkeys(metric_names));source_cache={}
         for symbol in symbols:
@@ -335,10 +335,44 @@ class RepositoryStaticAnalyzer:
                 metrics.append(RepositoryComponentRecord(component_id=f"metric:{symbol.symbol_id}",name=symbol.name,kind="metric_implementation",paths=(symbol.path,),symbol_ids=(symbol.symbol_id,),details={"discovery":"evaluation_output_context"},evidence=evidence))
         for config in configs:
             lower=config.key_path.casefold();evidence=config.evidence
-            if any(x in lower for x in ("ablation","use_","disable","lambda_","loss_weight")):ablations.append(RepositoryComponentRecord(component_id=f"ablation:{config.config_id}",name=config.key_path,kind="config_switch",paths=(config.path,),details={"value":config.value},evidence=evidence))
+            details=self._config_ablation_details(config)
+            if details is not None:ablations.append(RepositoryComponentRecord(component_id=f"ablation:{config.config_id}",name=config.key_path,aliases=(config.key_path.replace("_"," "),),kind="config_switch",paths=(config.path,),details=details,evidence=evidence))
             if any(x in lower for x in ("checkpoint","resume","pretrained","weights")):checkpoints.append(RepositoryComponentRecord(component_id=f"checkpoint:{config.config_id}",name=config.key_path,kind="checkpoint_config",paths=(config.path,),details={"value":config.value},evidence=evidence))
             if any(x in lower for x in ("output","log_dir","save_dir","result")):artifacts.append(RepositoryComponentRecord(component_id=f"artifact:{config.config_id}",name=config.key_path,kind="artifact_path",paths=(config.path,),details={"value":config.value},evidence=evidence))
+        for entry in entrypoints:
+            for argument in entry.arguments:
+                details=self._cli_ablation_details(argument,entry.entrypoint_id)
+                if details is None:continue
+                normalized=argument.name.lstrip("-").replace("-","_")
+                evidence=(repo_evidence(snapshot,argument.source,argument.name),)
+                aliases=(normalized.replace("_"," "),)
+                ablations.append(RepositoryComponentRecord(component_id=f"ablation:cli:{entry.entrypoint_id}:{normalized}",name=normalized,aliases=aliases,kind="ablation_cli_argument",paths=(entry.path,),details=details,evidence=evidence))
         return tuple(datasets),tuple(models),tuple(ablations),tuple(metrics),tuple(checkpoints),tuple(artifacts)
+    @staticmethod
+    def _config_ablation_details(config):
+        key=config.key_path.rsplit(".",1)[-1].replace("-","_").casefold();value=config.value
+        base={"default_value":value,"application":"config_value","config_id":config.config_id,"key_path":config.key_path}
+        numeric=isinstance(value,(int,float)) and not isinstance(value,bool)
+        if numeric and ("loss_weight" in key or "lambda_" in key or "loss" in key and any(term in key for term in ("alpha","weight","coefficient","coef"))):
+            return {**base,"value":0,"disable_value":0,"semantic_role":"loss_weight"}
+        if isinstance(value,bool) and (key.startswith("use_") or key.startswith("enable_")):
+            return {**base,"value":False,"disable_value":False,"semantic_role":"enable_flag"}
+        if isinstance(value,bool) and "disable" in key:
+            return {**base,"value":True,"disable_value":True,"semantic_role":"disable_flag"}
+        if "ablation" in key:return {**base,"value":value}
+        return None
+    @staticmethod
+    def _cli_ablation_details(argument,entrypoint_id):
+        key=argument.name.lstrip("-").replace("-","_").casefold()
+        numeric_default=isinstance(argument.default,(int,float)) and not isinstance(argument.default,bool)
+        loss_weight=("loss" in key and any(term in key for term in ("alpha","lambda","weight","coefficient","coef")))
+        if loss_weight and numeric_default:
+            return {"value":0,"default_value":argument.default,"disable_value":0,"application":"cli_argument","argument_name":argument.name,"entrypoint_id":entrypoint_id,"semantic_role":"loss_weight"}
+        if "disable" in key and argument.action=="store_true":
+            return {"value":True,"default_value":argument.default,"disable_value":True,"application":"cli_argument","argument_name":argument.name,"entrypoint_id":entrypoint_id,"semantic_role":"disable_flag"}
+        if any(term in key for term in ("use_","enable_")) and argument.action=="store_false":
+            return {"value":False,"default_value":argument.default,"disable_value":False,"application":"cli_argument","argument_name":argument.name,"entrypoint_id":entrypoint_id,"semantic_role":"enable_flag"}
+        return None
     @staticmethod
     def _metric_key(value):
         normalized=unicodedata.normalize("NFKC",value or "").casefold()
