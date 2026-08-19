@@ -57,8 +57,5 @@ pnpm run build
 - [项目结构与迁移说明](docs/PROJECT_STRUCTURE.md)
 - [实验领域模型与运行时契约](docs/DOMAIN_MODEL.md)
 - [论文复现任务规范](docs/REPRODUCTION_SPEC.md)
-- [迁移前 Curie 源码分析](docs/CURIE_CODEBASE_ANALYSIS.md)
 
-## Attribution 与许可证
 
-Curie Core 源自 [Just-Curieous/Curie](https://github.com/Just-Curieous/Curie) 提交 `db1b1f56159b591515f77e03c55bf473d5c1c201`，并在 Apache License 2.0 下二次开发。原始许可与版权声明保留在 [LICENSE](LICENSE)。
